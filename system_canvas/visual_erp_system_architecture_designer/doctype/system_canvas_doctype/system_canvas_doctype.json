@@ -1,0 +1,110 @@
+{
+ "actions": [],
+ "autoname": "field:doctype_name",
+ "creation": "2026-08-10 21:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "project",
+  "doctype_name",
+  "description",
+  "column_break_htya",
+  "is_child_table",
+  "is_submittable",
+  "position_x",
+  "position_y",
+  "section_break_arvd",
+  "fields"
+ ],
+ "fields": [
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Project",
+   "options": "System Canvas Project",
+   "reqd": 1
+  },
+  {
+   "fieldname": "doctype_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "DocType Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_child_table",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Is Child Table"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_submittable",
+   "fieldtype": "Check",
+   "label": "Is Submittable"
+  },
+  {
+   "default": "100",
+   "fieldname": "position_x",
+   "fieldtype": "Float",
+   "hidden": 1,
+   "label": "Canvas X Position"
+  },
+  {
+   "default": "100",
+   "fieldname": "position_y",
+   "fieldtype": "Float",
+   "hidden": 1,
+   "label": "Canvas Y Position"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "fields",
+   "fieldtype": "Table",
+   "label": "Fields",
+   "options": "System Canvas Field"
+  },
+  {
+   "fieldname": "column_break_htya",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_arvd",
+   "fieldtype": "Section Break"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-10 21:22:27.970129",
+ "modified_by": "Administrator",
+ "module": "Visual ERP System Architecture Designer",
+ "name": "System Canvas DocType",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

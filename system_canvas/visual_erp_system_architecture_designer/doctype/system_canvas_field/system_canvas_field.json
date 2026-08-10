@@ -1,0 +1,63 @@
+{
+ "actions": [],
+ "creation": "2026-08-10 21:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "fieldname",
+  "fieldtype",
+  "options",
+  "reqd",
+  "description"
+ ],
+ "fields": [
+  {
+   "fieldname": "fieldname",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Fieldname",
+   "reqd": 1
+  },
+  {
+   "fieldname": "fieldtype",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Field Type",
+   "options": "Data\nLink\nTable\nSelect\nInt\nFloat\nCurrency\nCheck\nDate\nDatetime\nSmall Text\nText\nCode\nDynamic Link\nAttach\nAttach Image\nSignature\nColor\nRating",
+   "reqd": 1
+  },
+  {
+   "fieldname": "options",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Options / Target DocType"
+  },
+  {
+   "default": "0",
+   "fieldname": "reqd",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Mandatory"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Data",
+   "label": "Description"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-10 21:21:31.018497",
+ "modified_by": "Administrator",
+ "module": "Visual ERP System Architecture Designer",
+ "name": "System Canvas Field",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
