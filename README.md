@@ -13,39 +13,29 @@ The following diagram illustrates the flow of data between the interactive front
 
 ```mermaid
 graph TD
-    %% Styling
-    classDef browser fill:#0F172A,stroke:#38BDF8,stroke-width:2px,color:#F8FAFC;
-    classDef backend fill:#1E293B,stroke:#818CF8,stroke-width:2px,color:#F8FAFC;
-    classDef database fill:#0F172A,stroke:#F59E0B,stroke-width:2px,color:#F8FAFC;
-
-    %% Nodes
-    subgraph Browser_UI ["Frontend Canvas Engine (public/js/canvas_engine.js)"]
-        UI_Control["Control Toolbar<br/>(Pan, Zoom, Fullscreen)"]
-        DocType_Cards["Interactive DOM Cards<br/>(DocType & Field Rows)"]
-        SVG_Layer["SVG Overlay Layer<br/>(Smart Axis Path Routing)"]
-        Inspector["Right Sidebar Inspector<br/>(Fields, Properties, Connections)"]
+    subgraph Browser_UI
+        UI_Control[Control Toolbar]
+        DocType_Cards[Interactive DOM Cards]
+        SVG_Layer[SVG Overlay Layer]
+        Inspector[Right Sidebar Inspector]
     end
-    class Browser_UI,UI_Control,DocType_Cards,SVG_Layer,Inspector browser;
 
-    subgraph Frappe_Backend ["Frappe App Backend (api.py)"]
-        API_Endpoints["Python REST API Endpoints<br/>(get_project, save_canvas, etc.)"]
-        Sync_Engine["Schema Sync Engine<br/>(frappe.get_doc / custom = 1)"]
+    subgraph Frappe_Backend
+        API_Endpoints[Python REST API Endpoints]
+        Sync_Engine[Schema Sync Engine]
     end
-    class Frappe_Backend,API_Endpoints,Sync_Engine backend;
 
-    subgraph Database_Layer ["Frappe Database (PostgreSQL/MySQL)"]
-        Canvas_Docs["System Canvas DocTypes<br/>(Project, Node Positions, Relations)"]
-        Frappe_Schema["Frappe Core Meta Tables<br/>(tabDocType, tabCustom Field, tabDocPerm)"]
+    subgraph Database_Layer
+        Canvas_Docs[System Canvas DocTypes]
+        Frappe_Schema[Frappe Core Meta Tables]
     end
-    class Database_Layer,Canvas_Docs,Frappe_Schema database;
 
-    %% Links
-    DocType_Cards -->|Drag/Resize Coordinates| UI_Control
-    SVG_Layer -->|Draws Arrowheads & Curves| DocType_Cards
-    UI_Control -->|frappe.call (JSON)| API_Endpoints
-    API_Endpoints -->|CRUD Operations| Canvas_Docs
-    API_Endpoints -->|Trigger Sync| Sync_Engine
-    Sync_Engine -->|Create / Update / Delete| Frappe_Schema
+    DocType_Cards --> UI_Control
+    SVG_Layer --> DocType_Cards
+    UI_Control --> API_Endpoints
+    API_Endpoints --> Canvas_Docs
+    API_Endpoints --> Sync_Engine
+    Sync_Engine --> Frappe_Schema
 ```
 
 ---
