@@ -110,29 +110,36 @@ def get_project_details(project_name):
 
 @frappe.whitelist()
 def save_doctype(project_name, doctype_name, module="Selling", is_child_table=0, is_submittable=0, description="", fields=None, position_x=100, position_y=100):
-	"""Create or update a System Canvas DocType and its fields."""
+	"""Create or update a System Canvas DocType and its fields cleanly."""
 	if not project_name or not doctype_name:
 		frappe.throw(_("Project Name and DocType Name are required"))
-		
+
+	doctype_name = doctype_name.strip()
 	if isinstance(fields, str):
 		fields = json.loads(fields)
-		
+
 	is_child_table = int(is_child_table or 0)
 	is_submittable = int(is_submittable or 0)
-	
-	existing = frappe.db.get_value("System Canvas DocType", {"project": project_name, "doctype_name": doctype_name}, "name")
-	
-	if existing:
-		doc = frappe.get_doc("System Canvas DocType", existing)
+
+	# Find existing by doctype_name filter or name primary key
+	existing_names = frappe.get_all("System Canvas DocType", filters={"doctype_name": doctype_name}, pluck="name")
+	if not existing_names and frappe.db.exists("System Canvas DocType", doctype_name):
+		existing_names = [doctype_name]
+
+	if existing_names:
+		doc = frappe.get_doc("System Canvas DocType", existing_names[0])
 	else:
 		doc = frappe.new_doc("System Canvas DocType")
-		doc.project = project_name
 		doc.doctype_name = doctype_name
 		doc.position_x = float(position_x or 100)
 		doc.position_y = float(position_y or 100)
+
+	doc.project = project_name
+	doc.module = module or "Selling"
 	doc.is_child_table = is_child_table
 	doc.is_submittable = is_submittable
 	doc.description = description
+
 	
 	# Replace fields
 	doc.fields = []
@@ -387,5 +394,17 @@ def add_existing_doctype(project_name, doctype_name, position_x=100, position_y=
 							
 	saved["imported_related"] = imported_related
 	return saved
+
+@frappe.whitelist()
+def get_modules():
+	"""Fetch list of all installed Frappe modules for dropdown selectors."""
+	modules = frappe.get_all("Module Def", fields=["name", "module_name", "app_name"], order_by="module_name asc")
+	if not modules:
+		modules = [{"name": m, "module_name": m} for m in [
+			"Selling", "Buying", "Stock", "Accounts", "HR", "CRM", "Projects", "Manufacturing",
+			"Quality Management", "Setup", "Custom", "Core", "Desk", "Integrations", "Automation"
+		]]
+	return modules
+
 
 

@@ -147,12 +147,15 @@
 /* Left Sidebar (Explorer) */
 .sc-sidebar-left {
 	width: 280px;
+	min-width: 280px;
+	flex-shrink: 0;
 	background: rgba(15, 23, 42, 0.95);
 	border-right: 1px solid var(--sc-border);
 	display: flex;
 	flex-direction: column;
 	z-index: 20;
 }
+
 
 .sc-sidebar-header {
 	padding: 14px 16px;
@@ -261,6 +264,11 @@
 	height: 10000px;
 	pointer-events: none;
 	z-index: 15;
+}
+
+.sc-edge-group {
+	pointer-events: auto;
+	cursor: pointer;
 }
 
 .sc-edge-path {
@@ -469,12 +477,15 @@
 /* Right Inspector Panel */
 .sc-sidebar-right {
 	width: 300px;
+	min-width: 300px;
+	flex-shrink: 0;
 	background: rgba(15, 23, 42, 0.95);
 	border-left: 1px solid var(--sc-border);
 	display: flex;
 	flex-direction: column;
 	z-index: 20;
 }
+
 
 .sc-inspector-header {
 	padding: 14px 16px;
@@ -536,11 +547,12 @@
 	height: 100vh;
 	background: rgba(0, 0, 0, 0.75);
 	backdrop-filter: blur(8px);
-	z-index: 1000;
+	z-index: 999999;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 }
+
 
 .sc-modal-window {
 	width: 850px;
@@ -627,4 +639,59 @@
 	color: #fff !important;
 	transform: scale(1.15);
 }
+
+/* Expandable & Collapsible Sidebars */
+.sc-sidebar-left, .sc-sidebar-right {
+	transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sc-sidebar-left.collapsed {
+	width: 44px !important;
+	min-width: 44px !important;
+	max-width: 44px !important;
+	flex-shrink: 0 !important;
+	overflow: hidden;
+}
+
+.sc-sidebar-left.collapsed .sc-sidebar-title-text,
+.sc-sidebar-left.collapsed #sc-explorer-count,
+.sc-sidebar-left.collapsed .sc-tree-container {
+	display: none !important;
+}
+
+.sc-sidebar-right.collapsed {
+	width: 44px !important;
+	min-width: 44px !important;
+	max-width: 44px !important;
+	flex-shrink: 0 !important;
+	overflow: hidden;
+}
+
+.sc-sidebar-right.collapsed .sc-sidebar-title-text,
+.sc-sidebar-right.collapsed .sc-inspector-content {
+	display: none !important;
+}
+
+
+.sc-icon-toggle-btn {
+	background: transparent;
+	border: 1px solid var(--sc-border);
+	color: var(--sc-text-muted);
+	border-radius: 6px;
+	width: 26px;
+	height: 26px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	font-size: 11px;
+	transition: all 0.2s ease;
+}
+
+.sc-icon-toggle-btn:hover {
+	color: var(--sc-text-main);
+	border-color: var(--sc-accent-blue);
+	background: rgba(56, 189, 248, 0.1);
+}
+
 

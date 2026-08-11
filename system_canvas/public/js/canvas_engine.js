@@ -18,19 +18,29 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		this.doctypes = [];
 		this.dataRelations = [];
 		this.workflows = [];
-		this.systemDocTypes = [];
-
-		
-		// Interaction state
-		this.selectedDocType = null;
-		this.focusedDocType = null;
 		this.filterDataRelations = true;
 		this.filterChildTables = true;
-		this.searchQuery = "";
+		this.modules = ["Selling", "Buying", "Stock", "Accounts", "HR", "CRM", "Projects", "Manufacturing", "Quality Management", "Setup", "Custom", "Core", "Desk", "Integrations", "Automation"];
 		
 		this.initDOM();
 		this.bindEvents();
+		this.loadModulesList();
 	}
+	
+	loadModulesList() {
+		frappe.call({
+			method: "system_canvas.api.get_modules",
+			callback: (r) => {
+				if (r.message && Array.isArray(r.message)) {
+					const modNames = r.message.map(m => typeof m === 'object' ? (m.module_name || m.name) : m).filter(Boolean);
+					if (modNames.length > 0) {
+						this.modules = modNames;
+					}
+				}
+			}
+		});
+	}
+
 	
 	initDOM() {
 		this.wrapper.innerHTML = `
@@ -48,21 +58,26 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 						<button class="sc-btn sc-btn-primary" id="sc-btn-new-project">+ New Project</button>
 					</div>
 					<div class="sc-header-actions">
-						<button class="sc-btn" id="sc-btn-fullscreen" style="display:none;" onclick="window.canvasEngine.toggleFullScreen()">📺 Full Screen</button>
+						<button class="sc-btn" id="sc-btn-fullscreen" style="display:none;">📺 Full Screen</button>
+						<button class="sc-btn" id="sc-btn-brd-srs" style="display:none;">📋 BRD / SRS Builder</button>
 						<button class="sc-btn" id="sc-btn-new-doctype" style="display:none;">+ New DocType</button>
 						<button class="sc-btn" id="sc-btn-auto-layout" style="display:none;">📐 Auto Layout</button>
 						<button class="sc-btn" id="sc-btn-full-canvas" style="display:none;">Fit Canvas</button>
 						<button class="sc-btn sc-btn-success" id="sc-btn-generate" style="display:none;">⚡ Generate Frappe</button>
 					</div>
+
 				</header>
 				
 				<!-- 3-Pane Body -->
 				<div class="sc-body">
 					<!-- Left Explorer -->
-					<aside class="sc-sidebar-left">
+					<aside class="sc-sidebar-left" id="sc-sidebar-left">
 						<div class="sc-sidebar-header">
-							<span>Project Explorer</span>
-							<span id="sc-explorer-count">0 DocTypes</span>
+							<span class="sc-sidebar-title-text">Project Explorer</span>
+							<div style="display:flex; align-items:center; gap:8px;">
+								<span id="sc-explorer-count">0 DocTypes</span>
+								<button class="sc-icon-toggle-btn" id="sc-toggle-left-sidebar" title="Collapse/Expand Left Sidebar">◀</button>
+							</div>
 						</div>
 						<div class="sc-tree-container" id="sc-tree-container">
 							<div style="padding:16px; color:var(--sc-text-muted); text-align:center;">Select or create a project to start</div>
@@ -115,18 +130,21 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 					<!-- Right Inspector Panel -->
 					<aside class="sc-sidebar-right" id="sc-sidebar-right">
 						<div class="sc-inspector-header">
-							<span class="sc-inspector-title">Properties</span>
+							<button class="sc-icon-toggle-btn" id="sc-toggle-right-sidebar" title="Collapse/Expand Right Sidebar">▶</button>
+							<span class="sc-inspector-title sc-sidebar-title-text">Properties</span>
 						</div>
 						<div class="sc-inspector-content" id="sc-inspector-content">
 							<div style="color:var(--sc-text-muted); text-align:center; padding-top:40px;">Select an item to view properties</div>
 						</div>
 					</aside>
 				</div>
+
+				
+				<!-- Modal Container (Level 3 Detail View, BRD, New DocType, Add Field) -->
+				<div id="sc-modal-container"></div>
 			</div>
-			
-			<!-- Modal Container (Level 3 Detail View) -->
-			<div id="sc-modal-container"></div>
 		`;
+
 		
 		this.viewport = document.getElementById('sc-canvas-viewport');
 		this.transformLayer = document.getElementById('sc-canvas-transform');
@@ -166,43 +184,66 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		window.addEventListener('mouseup', () => {
 			this.isPanning = false;
 		});
-		
-		// Controls
-		document.getElementById('sc-zoom-in').addEventListener('click', () => this.setZoom(this.zoom * 1.2));
-		document.getElementById('sc-zoom-out').addEventListener('click', () => this.setZoom(this.zoom * 0.8));
-		document.getElementById('sc-zoom-reset').addEventListener('click', () => {
+
+		const addEv = (id, event, fn) => {
+			const el = document.getElementById(id);
+			if (el) el.addEventListener(event, fn);
+		};
+
+		addEv('sc-zoom-in', 'click', () => {
+			this.zoom = Math.min(2.5, this.zoom + 0.15);
+			this.applyTransform();
+		});
+		addEv('sc-zoom-out', 'click', () => {
+			this.zoom = Math.max(0.3, this.zoom - 0.15);
+			this.applyTransform();
+		});
+		addEv('sc-zoom-reset', 'click', () => {
 			this.zoom = 1;
 			this.panX = 0;
 			this.panY = 0;
 			this.applyTransform();
 		});
-		document.getElementById('sc-btn-full-canvas').addEventListener('click', () => this.fitToScreen());
-		document.getElementById('sc-focus-reset').addEventListener('click', () => this.setFocus(null));
-		
-		// Project Selector & Buttons
-		this.projectSelect.addEventListener('change', (e) => {
-			if (e.target.value) {
-				this.loadProject(e.target.value);
-			}
-		});
-		
-		document.getElementById('sc-btn-new-project').addEventListener('click', () => this.showNewProjectModal());
-		document.getElementById('sc-btn-new-doctype').addEventListener('click', () => this.showNewDocTypeModal());
-		document.getElementById('sc-btn-auto-layout').addEventListener('click', () => this.autoLayout());
-		document.getElementById('sc-btn-generate').addEventListener('click', () => this.triggerGenerateFrappe());
-		
-		// Filters & Search
-		document.getElementById('sc-filter-data').addEventListener('change', (e) => {
+		addEv('sc-btn-fullscreen', 'click', () => this.toggleFullScreen());
+		addEv('sc-btn-full-canvas', 'click', () => this.fitToScreen());
+		addEv('sc-focus-reset', 'click', () => this.setFocus(null));
+
+		if (this.projectSelect) {
+			this.projectSelect.addEventListener('change', (e) => {
+				if (e.target.value) {
+					this.loadProject(e.target.value);
+				}
+			});
+		}
+
+		addEv('sc-btn-new-project', 'click', () => this.showNewProjectModal());
+		addEv('sc-btn-brd-srs', 'click', () => this.showBRDModal());
+		addEv('sc-btn-new-doctype', 'click', () => this.showNewDocTypeModal());
+		addEv('sc-btn-auto-layout', 'click', () => this.autoLayout());
+		addEv('sc-btn-generate', 'click', () => this.triggerGenerateFrappe());
+		addEv('sc-toggle-left-sidebar', 'click', () => this.toggleLeftSidebar());
+		addEv('sc-toggle-right-sidebar', 'click', () => this.toggleRightSidebar());
+
+		const filterDataEl = document.getElementById('sc-filter-data');
+		if (filterDataEl) {
+			this.filterDataRelations = filterDataEl.checked;
+		}
+		const filterChildEl = document.getElementById('sc-filter-child');
+		if (filterChildEl) {
+			this.filterChildTables = filterChildEl.checked;
+		}
+
+		addEv('sc-filter-data', 'change', (e) => {
 			this.filterDataRelations = e.target.checked;
 			this.renderEdges();
 		});
-		document.getElementById('sc-filter-child').addEventListener('change', (e) => {
+		addEv('sc-filter-child', 'change', (e) => {
 			this.filterChildTables = e.target.checked;
 			this.renderNodes();
 			this.renderEdges();
 		});
-		
-		document.getElementById('sc-search-input').addEventListener('input', (e) => {
+
+		addEv('sc-search-input', 'input', (e) => {
 			this.searchQuery = e.target.value.toLowerCase().trim();
 			this.filterNodesBySearch();
 		});
@@ -375,10 +416,13 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 			
 			const fields = dt.fields || [];
 			const linkFields = fields.filter(f => f.fieldtype === 'Link' || f.fieldtype === 'Table');
+			const otherFields = fields.filter(f => f.fieldtype !== 'Link' && f.fieldtype !== 'Table');
+			const displayFields = [...linkFields, ...otherFields];
 			
 			let fieldsHtml = `<div class="sc-node-fields-list">`;
-			if (fields.length > 0) {
-				fields.slice(0, 5).forEach(f => {
+			if (displayFields.length > 0) {
+				const maxShow = Math.max(5, linkFields.length);
+				displayFields.slice(0, maxShow).forEach(f => {
 					let pillClass = 'sc-field-type-pill';
 					if (f.fieldtype === 'Link') pillClass += ' sc-field-type-link';
 					if (f.fieldtype === 'Table') pillClass += ' sc-field-type-table';
@@ -391,13 +435,14 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 						</div>
 					`;
 				});
-				if (fields.length > 5) {
-					fieldsHtml += `<div style="font-size:10px; color:var(--sc-text-muted); text-align:center; margin-top:2px;">+ ${fields.length - 5} more fields</div>`;
+				if (displayFields.length > maxShow) {
+					fieldsHtml += `<div style="font-size:10px; color:var(--sc-text-muted); text-align:center; margin-top:2px;">+ ${displayFields.length - maxShow} more fields</div>`;
 				}
 			} else {
 				fieldsHtml += `<div style="font-size:11px; color:var(--sc-text-muted); padding:4px;">No fields</div>`;
 			}
 			fieldsHtml += `</div>`;
+
 			
 			card.innerHTML = `
 				<div class="sc-node-header" style="display: flex; justify-content: space-between; align-items: center;">
@@ -490,152 +535,190 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 	
 	renderEdges() {
 		this.svgEdgesGroup.innerHTML = '';
-		
-		// Data Relations Flowchart
+
 		if (this.filterDataRelations) {
-			this.dataRelations.forEach(rel => {
+			const targetInCount = {};
+			this.dataRelations.forEach((rel, index) => {
 				const srcCard = document.getElementById(`sc-node-${rel.source}`);
 				const tgtCard = document.getElementById(`sc-node-${rel.target}`);
-				if (srcCard && tgtCard) {
+				if (srcCard) {
 					const isTable = rel.relation_type === 'Table';
 					const markerId = isTable ? 'arrow-table' : 'arrow-data';
 					const edgeClass = isTable ? 'sc-edge-table' : 'sc-edge-data';
-					this.drawBezierEdge(srcCard, tgtCard, markerId, edgeClass, rel);
+
+					const tgtKey = rel.target || 'stub';
+					targetInCount[tgtKey] = (targetInCount[tgtKey] || 0) + 1;
+
+					this.drawBezierEdge(srcCard, tgtCard, markerId, edgeClass, rel, index, targetInCount[tgtKey]);
 				}
 			});
 		}
 	}
-	
-	drawBezierEdge(srcCard, tgtCard, markerId, edgeClass, rel) {
-		const srcRect = {
-			x: parseFloat(srcCard.style.left),
-			y: parseFloat(srcCard.style.top),
-			w: srcCard.offsetWidth || 240,
-			h: srcCard.offsetHeight || 120
+
+	drawBezierEdge(srcCard, tgtCard, markerId, edgeClass, rel, edgeIndex = 0, inIndex = 1) {
+		const getCardCoords = (card) => {
+			if (!card) return { x: 100, y: 100, w: 260, h: 140 };
+			const leftVal = parseFloat(card.style.left);
+			const topVal = parseFloat(card.style.top);
+			const x = !isNaN(leftVal) ? leftVal : (card.offsetLeft || 100);
+			const y = !isNaN(topVal) ? topVal : (card.offsetTop || 100);
+			const w = card.offsetWidth || 260;
+			const h = card.offsetHeight || 140;
+			return { x, y, w, h };
 		};
-		
-		let startY = srcRect.y + srcRect.h / 2;
+
+		const srcRect = getCardCoords(srcCard);
+
+		let startY = srcRect.y + 40;
 		const fieldElem = document.getElementById(`sc-field-${rel.source}-${rel.fieldname}`);
-		if (fieldElem) {
-			const offsetTop = fieldElem.offsetTop;
-			const offsetHeight = fieldElem.offsetHeight;
-			if (offsetHeight > 0) {
-				startY = srcRect.y + offsetTop + offsetHeight / 2;
+		if (fieldElem && fieldElem.getBoundingClientRect && srcCard.getBoundingClientRect) {
+			const fRect = fieldElem.getBoundingClientRect();
+			const cRect = srcCard.getBoundingClientRect();
+			if (fRect.height > 0) {
+				const relativeY = (fRect.top - cRect.top + fRect.height / 2) / (this.zoom || 1);
+				startY = srcRect.y + relativeY;
 			}
 		}
-		
+
 		let startX, endX, endY, controlX1, controlY1, controlX2, controlY2, d;
-		
+
 		if (tgtCard) {
-			const tgtRect = {
-				x: parseFloat(tgtCard.style.left),
-				y: parseFloat(tgtCard.style.top),
-				w: tgtCard.offsetWidth || 240,
-				h: tgtCard.offsetHeight || 120
-			};
-			
-			const srcCenter = { x: srcRect.x + srcRect.w / 2, y: srcRect.y + srcRect.h / 2 };
-			const tgtCenter = { x: tgtRect.x + tgtRect.w / 2, y: tgtRect.y + tgtRect.h / 2 };
-			
-			const dx = tgtCenter.x - srcCenter.x;
-			const dy = tgtCenter.y - srcCenter.y;
-			
-			if (Math.abs(dx) > Math.abs(dy)) {
-				// Horizontal dominant connection
-				if (dx > 0) {
-					// Target is to the right: connect Right of Source to Left of Target
+			const tgtRect = getCardCoords(tgtCard);
+
+			const dx = tgtRect.x - srcRect.x;
+			const dy = tgtRect.y - srcRect.y;
+
+			const tgtFieldElem = document.getElementById(`sc-field-${rel.target}-${rel.fieldname}`);
+			if (tgtFieldElem && tgtFieldElem.getBoundingClientRect && tgtCard.getBoundingClientRect) {
+				const tfRect = tgtFieldElem.getBoundingClientRect();
+				const tcRect = tgtCard.getBoundingClientRect();
+				if (tfRect.height > 0) {
+					endY = tgtRect.y + (tfRect.top - tcRect.top + tfRect.height / 2) / (this.zoom || 1);
+				} else {
+					const spreadOffset = ((inIndex - 1) * 22) % Math.max(tgtRect.h - 40, 40);
+					endY = tgtRect.y + 35 + spreadOffset;
+				}
+			} else {
+				const spreadOffset = ((inIndex - 1) * 22) % Math.max(tgtRect.h - 40, 40);
+				endY = tgtRect.y + 35 + spreadOffset;
+			}
+
+			if (Math.abs(dx) > Math.abs(dy) || Math.abs(dx) > 140) {
+				if (dx >= 0) {
 					startX = srcRect.x + srcRect.w;
 					endX = tgtRect.x - 6;
+					const ctrlOffset = Math.max(60, Math.min(220, Math.abs(endX - startX) * 0.45));
+					controlX1 = startX + ctrlOffset;
+					controlY1 = startY;
+					controlX2 = endX - ctrlOffset;
+					controlY2 = endY;
 				} else {
-					// Target is to the left: connect Left of Source to Right of Target
 					startX = srcRect.x;
 					endX = tgtRect.x + tgtRect.w + 6;
+					const ctrlOffset = Math.max(60, Math.min(220, Math.abs(startX - endX) * 0.45));
+					controlX1 = startX - ctrlOffset;
+					controlY1 = startY;
+					controlX2 = endX + ctrlOffset;
+					controlY2 = endY;
 				}
-				endY = tgtRect.y + tgtRect.h / 2;
-				
-				const ctrlX = Math.abs(endX - startX) * 0.5;
-				controlX1 = startX + (endX > startX ? ctrlX : -ctrlX);
-				controlY1 = startY;
-				controlX2 = endX - (endX > startX ? ctrlX : -ctrlX);
-				controlY2 = endY;
 			} else {
-				// Vertical dominant connection
 				startX = srcRect.x + srcRect.w / 2;
-				endX = tgtRect.x + tgtRect.w / 2;
-				
+				endX = tgtRect.x + Math.min(60 + (inIndex * 20), tgtRect.w - 30);
+
 				if (dy > 0) {
-					// Target is below: connect Bottom of Source to Top of Target
 					startY = srcRect.y + srcRect.h;
 					endY = tgtRect.y - 6;
-					
-					const ctrlY = Math.abs(endY - startY) * 0.5;
+					const ctrlY = Math.max(50, Math.min(180, Math.abs(endY - startY) * 0.45));
 					controlX1 = startX;
 					controlY1 = startY + ctrlY;
 					controlX2 = endX;
 					controlY2 = endY - ctrlY;
 				} else {
-					// Target is above: connect Top of Source to Bottom of Target
 					startY = srcRect.y;
 					endY = tgtRect.y + tgtRect.h + 6;
-					
-					const ctrlY = Math.abs(endY - startY) * 0.5;
+					const ctrlY = Math.max(50, Math.min(180, Math.abs(startY - endY) * 0.45));
 					controlX1 = startX;
 					controlY1 = startY - ctrlY;
 					controlX2 = endX;
 					controlY2 = endY + ctrlY;
 				}
 			}
+
+
+			if (isNaN(startX) || isNaN(startY) || isNaN(endX) || isNaN(endY) || isNaN(controlX1) || isNaN(controlY1) || isNaN(controlX2) || isNaN(controlY2)) {
+				return;
+			}
+
 			d = `M ${startX} ${startY} C ${controlX1} ${controlY1}, ${controlX2} ${controlY2}, ${endX} ${endY}`;
 		} else {
-			// External Target Relation Stub Edge
 			startX = srcRect.x + srcRect.w;
-			endX = startX + 130;
+			endX = startX + 140;
 			endY = startY;
+
+			if (isNaN(startX) || isNaN(startY) || isNaN(endX) || isNaN(endY)) {
+				return;
+			}
+
 			d = `M ${startX} ${startY} L ${endX} ${endY}`;
 		}
-		
+
 		const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
 		group.setAttribute('class', 'sc-edge-group');
-		
+
 		const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
 		path.setAttribute('d', d);
 		path.setAttribute('class', `sc-edge-path ${edgeClass}`);
 		path.setAttribute('marker-end', `url(#${markerId})`);
 		group.appendChild(path);
-		
-		// Flowchart Edge Badge Label
-		const midX = (startX + endX) / 2;
-		const midY = (startY + endY) / 2;
+
+		const t = 0.4 + ((edgeIndex % 3) * 0.1);
+		const invT = 1 - t;
+		let midX, midY;
+		if (tgtCard) {
+			midX = invT*invT*invT*startX + 3*invT*invT*t*controlX1 + 3*invT*t*t*controlX2 + t*t*t*endX;
+			midY = invT*invT*invT*startY + 3*invT*invT*t*controlY1 + 3*invT*t*t*controlY2 + t*t*t*endY;
+		} else {
+			midX = (startX + endX) / 2;
+			midY = (startY + endY) / 2;
+		}
+
+		const badgeOffset = ((edgeIndex % 3) - 1) * 20;
+		midY += badgeOffset;
+
+		if (isNaN(midX) || isNaN(midY)) return;
+
 		const labelText = tgtCard 
-			? rel.fieldname 
-			: `${rel.fieldname} ➔ ${rel.target}`;
-		const textLen = Math.max(labelText.length * 7 + 24, 75);
-		
+			? (rel.relation_type === 'Table' ? `📦 ${rel.fieldname}` : `🔗 ${rel.fieldname}`) 
+			: `🔗 ${rel.fieldname} ➔ ${rel.target}`;
+		const textLen = Math.max(labelText.length * 7 + 20, 80);
+
 		const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
 		rect.setAttribute('x', midX - textLen / 2);
-		rect.setAttribute('y', midY - 10);
+		rect.setAttribute('y', midY - 11);
 		rect.setAttribute('width', textLen);
-		rect.setAttribute('height', 20);
-		rect.setAttribute('rx', 5);
-		rect.setAttribute('fill', '#1E293B');
+		rect.setAttribute('height', 22);
+		rect.setAttribute('rx', 6);
+		rect.setAttribute('fill', '#0F172A');
 		rect.setAttribute('stroke', rel.relation_type === 'Table' ? '#F59E0B' : '#38BDF8');
-		rect.setAttribute('stroke-width', '1');
+		rect.setAttribute('stroke-width', '1.5');
 		group.appendChild(rect);
-		
+
 		const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
 		text.setAttribute('x', midX);
 		text.setAttribute('y', midY + 4);
 		text.setAttribute('fill', rel.relation_type === 'Table' ? '#FBBF24' : '#38BDF8');
-		text.setAttribute('font-size', '10');
+		text.setAttribute('font-size', '10px');
 		text.setAttribute('font-weight', '600');
+		text.setAttribute('font-family', 'system-ui, sans-serif');
 		text.setAttribute('text-anchor', 'middle');
-		text.textContent = `${rel.relation_type === 'Table' ? '📦' : '🔗'} ${labelText}`;
+		text.textContent = labelText;
 		group.appendChild(text);
-		
+
 		this.svgEdgesGroup.appendChild(group);
 	}
-	
+
 	selectDocType(doctypeName) {
+
 		this.selectedDocType = doctypeName;
 		this.renderTree();
 		
@@ -1039,8 +1122,11 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 							</div>
 							<div class="sc-prop-group">
 								<div class="sc-prop-label">Module</div>
-								<input type="text" class="sc-input" id="sc-input-dt-module" value="Selling">
+								<select class="sc-input" id="sc-input-dt-module">
+									${this.modules.map(m => `<option value="${m}" ${m === 'Selling' ? 'selected' : ''}>${m}</option>`).join('')}
+								</select>
 							</div>
+
 							<div class="sc-prop-group" style="display:flex; flex-direction:column; gap:8px; margin-top: 8px;">
 								<label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
 									<input type="checkbox" id="sc-input-dt-child">
@@ -1719,7 +1805,28 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		});
 	}
 
+	toggleLeftSidebar() {
+		const sidebar = document.getElementById('sc-sidebar-left');
+		const btn = document.getElementById('sc-toggle-left-sidebar');
+		if (!sidebar) return;
+		sidebar.classList.toggle('collapsed');
+		if (btn) {
+			btn.innerText = sidebar.classList.contains('collapsed') ? '▶' : '◀';
+		}
+	}
+
+	toggleRightSidebar() {
+		const sidebar = document.getElementById('sc-sidebar-right');
+		const btn = document.getElementById('sc-toggle-right-sidebar');
+		if (!sidebar) return;
+		sidebar.classList.toggle('collapsed');
+		if (btn) {
+			btn.innerText = sidebar.classList.contains('collapsed') ? '◀' : '▶';
+		}
+	}
+
 	toggleFullScreen() {
+
 		const elem = document.querySelector('.sc-app-wrapper');
 		if (!elem) return;
 		if (!document.fullscreenElement) {
@@ -1833,23 +1940,28 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		
 		const startX = 80;
 		const startY = 80;
-		const colWidth = 300;
-		const rowHeight = 220;
-		
+		const colWidth = 460;
+
 		let colIndex = 0;
 		layers.forEach(layerNodes => {
 			if (layerNodes.length > 0) {
-				layerNodes.forEach((node, rowIndex) => {
+				let currentY = startY;
+				layerNodes.forEach((node) => {
 					node.position_x = startX + colIndex * colWidth;
-					node.position_y = startY + rowIndex * rowHeight;
+					node.position_y = currentY;
+
+					const fieldCount = Math.min((node.fields || []).length, 12);
+					const estimatedHeight = Math.max(160, 80 + fieldCount * 28);
+					currentY += estimatedHeight + 70;
 				});
 				colIndex++;
 			}
 		});
-		
+
 		this.renderNodes();
 		this.renderEdges();
 		this.savePositionsDebounced();
 		this.fitToScreen();
 	}
 };
+
