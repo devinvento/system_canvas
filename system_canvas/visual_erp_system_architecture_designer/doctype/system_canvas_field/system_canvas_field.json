@@ -24,7 +24,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Field Type",
-   "options": "Data\nLink\nTable\nSelect\nInt\nFloat\nCurrency\nCheck\nDate\nDatetime\nSmall Text\nText\nCode\nDynamic Link\nAttach\nAttach Image\nSignature\nColor\nRating",
+   "options": "Data\nLink\nTable\nSelect\nInt\nFloat\nCurrency\nCheck\nDate\nDatetime\nSmall Text\nText\nCode\nDynamic Link\nAttach\nAttach Image\nSignature\nColor\nRating\nRead Only\nButton\nPassword\nLong Text\nHeading\nFold\nPercent\nTime\nDuration\nJSON\nGeolocation\nAutocomplete\nIcon",
    "reqd": 1
   },
   {
@@ -42,7 +42,7 @@
   },
   {
    "fieldname": "description",
-   "fieldtype": "Data",
+   "fieldtype": "Small Text",
    "label": "Description"
   }
  ],

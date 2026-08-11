@@ -81,3 +81,31 @@ class TestSystemCanvasAPI(unittest.TestCase):
 		generated = api.generate_frappe_doctypes(self.project_name)
 		self.assertEqual(generated["count"], 1)
 		self.assertEqual(generated["doctypes"][0]["name"], "Test Customer")
+
+	def test_system_doctype_import_and_listing(self):
+		api.create_project(project_name=self.project_name)
+
+		# 1. Fetch system doctypes list
+		system_dts = api.get_all_system_doctypes(project_name=self.project_name)
+		self.assertTrue(len(system_dts) > 0)
+		has_user = any(d["doctype_name"] == "User" for d in system_dts)
+		self.assertTrue(has_user)
+
+		# 2. Get system doctype details for User
+		user_details = api.get_system_doctype_details("User")
+		self.assertEqual(user_details["doctype_name"], "User")
+		self.assertTrue(len(user_details["fields"]) > 0)
+
+		# 3. Add existing system DocType "Customer" to project with auto_fetch_relations=1
+		imported = api.add_existing_doctype(project_name=self.project_name, doctype_name="Customer", auto_fetch_relations=1)
+		self.assertEqual(imported["doctype_name"], "Customer")
+		self.assertTrue("imported_related" in imported)
+
+		# 4. Check project details contain Customer DocType and auto-imported related DocTypes
+		details = api.get_project_details(self.project_name)
+		doctype_names = [dt["doctype_name"] for dt in details["doctypes"]]
+		self.assertIn("Customer", doctype_names)
+		self.assertTrue(len(details["doctypes"]) > 1)
+		self.assertTrue(len(details["data_relations"]) > 0)
+
+

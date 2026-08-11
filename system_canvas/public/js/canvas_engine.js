@@ -18,6 +18,8 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		this.doctypes = [];
 		this.dataRelations = [];
 		this.workflows = [];
+		this.systemDocTypes = [];
+
 		
 		// Interaction state
 		this.selectedDocType = null;
@@ -264,8 +266,20 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		});
 	}
 	
+	loadSystemDocTypesList(callback) {
+		frappe.call({
+			method: "system_canvas.api.get_all_system_doctypes",
+			args: { project_name: this.projectName },
+			callback: (r) => {
+				this.systemDocTypes = r.message || [];
+				if (callback) callback(this.systemDocTypes);
+			}
+		});
+	}
+	
 	loadProject(projectName, callback) {
 		this.projectName = projectName;
+		this.loadSystemDocTypesList();
 		frappe.call({
 			method: "system_canvas.api.get_project_details",
 			args: { project_name: projectName },
@@ -292,6 +306,7 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 			}
 		});
 	}
+
 
 	refreshFullModalIfOpen() {
 		const modal = document.getElementById('sc-modal-level3');
@@ -662,6 +677,40 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		});
 	}
 	
+	importExistingDocTypeAndConnect(doctypeName, posX = 100, posY = 100) {
+		frappe.call({
+			method: "system_canvas.api.add_existing_doctype",
+			args: {
+				project_name: this.projectName,
+				doctype_name: doctypeName,
+				position_x: posX,
+				position_y: posY,
+				auto_fetch_relations: 1
+			},
+			callback: (r) => {
+				if (r.message) {
+					const relCount = (r.message.imported_related || []).length;
+					const msg = relCount > 0
+						? `Added ${doctypeName} and ${relCount} related DocTypes (${r.message.imported_related.slice(0, 3).join(', ')}${relCount > 3 ? '...' : ''}) to Canvas`
+						: `Added ${doctypeName} to Canvas`;
+
+					frappe.show_alert({
+						message: __(msg),
+						indicator: 'green'
+					}, 5);
+
+					const modal = document.getElementById('sc-modal-doctype');
+					if (modal) modal.remove();
+
+					this.loadProject(this.projectName, () => {
+						this.autoLayout();
+					});
+				}
+			}
+		});
+	}
+
+
 	renderLevel2Inspector(doctypeName) {
 		const dt = this.doctypes.find(d => d.doctype_name === doctypeName);
 		if (!dt) return;
@@ -679,6 +728,18 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 			</div>
 		`).join('');
 		
+		const relRows = rels.map(r => {
+			const otherTarget = r.source === doctypeName ? r.target : r.source;
+			const isOnCanvas = this.doctypes.some(d => d.doctype_name === otherTarget);
+			const addBtn = !isOnCanvas ? `<button class="sc-btn sc-btn-primary" style="padding:1px 6px; font-size:10px; margin-left:4px;" onclick="window.canvasEngine.importExistingDocTypeAndConnect('${otherTarget}')">+ Add</button>` : '';
+			return `
+				<div style="font-size:12px; margin-top:6px; display:flex; align-items:center; justify-content:space-between; gap:4px;">
+					<div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">🔗 ${r.source} → <b>${r.target}</b> (${r.fieldname})</div>
+					${addBtn}
+				</div>
+			`;
+		}).join('');
+
 		this.inspectorContent.innerHTML = `
 			<div class="sc-prop-group">
 				<div class="sc-prop-label">DocType Details</div>
@@ -709,10 +770,11 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 			
 			<div class="sc-prop-group">
 				<div class="sc-prop-label">Connected Relations (${rels.length})</div>
-				${rels.map(r => `<div style="font-size:12px; margin-top:4px;">🔗 ${r.source} → <b>${r.target}</b> (${r.fieldname})</div>`).join('')}
+				${relRows || '<div style="color:var(--sc-text-muted); font-size:12px; margin-top:4px;">No relations</div>'}
 			</div>
 		`;
 	}
+
 	
 	showDocTypeFullModal(doctypeName) {
 		this.selectedDocType = doctypeName;
@@ -798,8 +860,19 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		} else if (tabName === 'relations') {
 			const rels = this.dataRelations.filter(r => r.source === dt.doctype_name || r.target === dt.doctype_name);
 			
-			const otherDocTypes = this.doctypes.filter(d => d.doctype_name !== dt.doctype_name);
-			const dtOptionsHtml = otherDocTypes.map(d => `<option value="${d.doctype_name}">${d.doctype_name}</option>`).join('');
+			const projNames = new Set((this.doctypes || []).map(d => d.doctype_name));
+			const otherDocTypes = (this.doctypes || []).filter(d => d.doctype_name !== dt.doctype_name);
+			const projOpts = otherDocTypes.map(d => `<option value="${d.doctype_name}">📄 ${d.doctype_name}</option>`).join('');
+			const sysOpts = (this.systemDocTypes || [])
+				.filter(d => !projNames.has(d.doctype_name))
+				.map(d => `<option value="${d.doctype_name}">🌐 ${d.doctype_name} (${d.module})</option>`)
+				.join('');
+
+			const dtOptionsHtml = `
+				${projOpts ? `<optgroup label="Project DocTypes">${projOpts}</optgroup>` : ''}
+				${sysOpts ? `<optgroup label="Existing Frappe DocTypes">${sysOpts}</optgroup>` : ''}
+			`;
+
 
 			content.innerHTML = `
 				<table class="sc-table" style="margin-bottom: 24px;">
@@ -912,10 +985,18 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		if (!container) return;
 
 		if (fieldType === 'Link' || fieldType === 'Table') {
-			const dtOptionsHtml = this.doctypes.map(d => `<option value="${d.doctype_name}">${d.doctype_name}</option>`).join('');
+			const projNames = new Set((this.doctypes || []).map(d => d.doctype_name));
+			const projOpts = (this.doctypes || []).map(d => `<option value="${d.doctype_name}">📄 ${d.doctype_name}</option>`).join('');
+			const sysOpts = (this.systemDocTypes || [])
+				.filter(d => !projNames.has(d.doctype_name))
+				.map(d => `<option value="${d.doctype_name}">🌐 ${d.doctype_name} (${d.module})</option>`)
+				.join('');
+
 			container.innerHTML = `
 				<select class="sc-input" id="sc-input-fld-opts" style="font-size: 12px; padding: 6px 10px; height: 32px; width: 100%;">
-					${dtOptionsHtml || '<option value="" disabled>No other DocTypes</option>'}
+					<option value="">-- Select Target DocType --</option>
+					${projOpts ? `<optgroup label="Project DocTypes">${projOpts}</optgroup>` : ''}
+					${sysOpts ? `<optgroup label="Existing Frappe System DocTypes">${sysOpts}</optgroup>` : ''}
 				</select>
 			`;
 		} else {
@@ -929,18 +1010,26 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 			if (input) input.value = defaultValue;
 		}
 	}
+
 	
 	showNewDocTypeModal() {
 		this.newDocTypeFields = [];
 		this.editingFieldIdx = null;
 		const html = `
 			<div class="sc-modal-backdrop" id="sc-modal-doctype">
-				<div class="sc-modal-window" style="width: 800px; max-width: 95vw;">
+				<div class="sc-modal-window" style="width: 840px; max-width: 95vw;">
 					<div class="sc-modal-header">
-						<div style="font-size:16px; font-weight:700;">+ Create New DocType</div>
+						<div style="font-size:16px; font-weight:700;">+ Add DocType to Project</div>
 						<button class="sc-btn" onclick="document.getElementById('sc-modal-doctype').remove()">✕</button>
 					</div>
-					<div class="sc-modal-body" style="display: flex; gap: 24px; padding: 20px; overflow: hidden; height: 450px;">
+
+					<div class="sc-modal-tabs" style="padding: 0 20px; border-bottom: 1px solid var(--sc-border); display: flex; gap: 16px;">
+						<div class="sc-modal-tab active" id="sc-tab-btn-custom" onclick="window.canvasEngine.switchNewDocTypeTab('custom')">✏️ Create Custom DocType</div>
+						<div class="sc-modal-tab" id="sc-tab-btn-existing" onclick="window.canvasEngine.switchNewDocTypeTab('existing')">🌐 Add Existing Frappe DocType</div>
+					</div>
+
+					<!-- Tab 1: Custom DocType Builder -->
+					<div class="sc-modal-body" id="sc-newdt-tab-custom" style="display: flex; gap: 24px; padding: 20px; overflow: hidden; height: 450px;">
 						<!-- Left Column: DocType Config -->
 						<div style="flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 250px; border-right: 1px solid var(--sc-border); padding-right: 24px; height: 100%; overflow-y: auto;">
 							<div style="font-weight: 600; font-size: 13px; color: var(--sc-accent-blue); text-transform: uppercase; tracking: 0.05em; margin-bottom: 4px;">DocType Configuration</div>
@@ -1021,7 +1110,18 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 							</div>
 						</div>
 					</div>
-					<div class="sc-modal-footer" style="padding: 12px 20px; border-top: 1px solid var(--sc-border); display: flex; justify-content: flex-end; gap: 10px; background: rgba(30, 41, 59, 0.2);">
+
+					<!-- Tab 2: Existing System DocTypes List -->
+					<div class="sc-modal-body" id="sc-newdt-tab-existing" style="display: none; flex-direction: column; gap: 14px; padding: 20px; overflow: hidden; height: 450px;">
+						<div style="display: flex; gap: 12px; align-items: center;">
+							<input type="text" class="sc-input" id="sc-input-search-sys-dt" placeholder="🔍 Search existing Frappe DocType by name or module..." oninput="window.canvasEngine.renderExistingDocTypesList(this.value)" style="flex: 1; padding: 8px 12px; font-size: 13px;">
+						</div>
+						<div id="sc-existing-doctypes-list-container" style="flex: 1; overflow-y: auto; border: 1px solid var(--sc-border); border-radius: 8px; background: rgba(15, 23, 42, 0.5);">
+							<!-- Populated dynamically -->
+						</div>
+					</div>
+
+					<div class="sc-modal-footer" id="sc-modal-doctype-footer" style="padding: 12px 20px; border-top: 1px solid var(--sc-border); display: flex; justify-content: flex-end; gap: 10px; background: rgba(30, 41, 59, 0.2);">
 						<button class="sc-btn" onclick="document.getElementById('sc-modal-doctype').remove()">Cancel</button>
 						<button class="sc-btn sc-btn-primary" onclick="window.canvasEngine.submitNewDocType()">Create DocType</button>
 					</div>
@@ -1042,6 +1142,84 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 
 		this.renderNewDocTypeFields();
 	}
+
+	switchNewDocTypeTab(tab) {
+		const customTabBtn = document.getElementById('sc-tab-btn-custom');
+		const existingTabBtn = document.getElementById('sc-tab-btn-existing');
+		const customTabContent = document.getElementById('sc-newdt-tab-custom');
+		const existingTabContent = document.getElementById('sc-newdt-tab-existing');
+		const modalFooter = document.getElementById('sc-modal-doctype-footer');
+
+		if (tab === 'custom') {
+			if (customTabBtn) customTabBtn.classList.add('active');
+			if (existingTabBtn) existingTabBtn.classList.remove('active');
+			if (customTabContent) customTabContent.style.display = 'flex';
+			if (existingTabContent) existingTabContent.style.display = 'none';
+			if (modalFooter) modalFooter.style.display = 'flex';
+		} else {
+			if (customTabBtn) customTabBtn.classList.remove('active');
+			if (existingTabBtn) existingTabBtn.classList.add('active');
+			if (customTabContent) customTabContent.style.display = 'none';
+			if (existingTabContent) existingTabContent.style.display = 'flex';
+			if (modalFooter) modalFooter.style.display = 'none';
+			this.renderExistingDocTypesList();
+		}
+	}
+
+	renderExistingDocTypesList(filterText = '') {
+		const container = document.getElementById('sc-existing-doctypes-list-container');
+		if (!container) return;
+
+		const q = (filterText || '').toLowerCase().trim();
+		const projNames = new Set((this.doctypes || []).map(d => d.doctype_name));
+
+		const filtered = (this.systemDocTypes || []).filter(dt => {
+			if (q) {
+				return dt.doctype_name.toLowerCase().includes(q) || (dt.module || '').toLowerCase().includes(q);
+			}
+			return true;
+		});
+
+		if (filtered.length === 0) {
+			container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--sc-text-muted);">No matching system DocTypes found</div>`;
+			return;
+		}
+
+		let html = `<table class="sc-table" style="width:100%; font-size:12px;">
+			<thead>
+				<tr style="background: rgba(30, 41, 59, 0.4); position: sticky; top: 0; z-index: 10;">
+					<th style="padding: 8px 12px;">DocType Name</th>
+					<th style="padding: 8px 12px;">Module</th>
+					<th style="padding: 8px 12px;">Type</th>
+					<th style="padding: 8px 12px; text-align: right;">Action</th>
+				</tr>
+			</thead>
+			<tbody>`;
+
+		filtered.forEach(dt => {
+			const isInProject = projNames.has(dt.doctype_name);
+			const childTag = dt.is_child_table ? '<span class="sc-tag sc-tag-child" style="margin-left:4px;">Child</span>' : '';
+			const submitTag = dt.is_submittable ? '<span class="sc-tag sc-tag-submittable" style="margin-left:4px;">Submittable</span>' : '';
+			const customTag = dt.custom ? '<span class="sc-tag" style="background: rgba(168, 85, 247, 0.2); color: #C084FC; margin-left:4px;">Custom</span>' : '';
+
+			const actionBtn = isInProject
+				? `<span style="font-size:11px; color:var(--sc-accent-green); font-weight:600;">✓ Added</span>`
+				: `<button class="sc-btn sc-btn-primary" style="padding:4px 10px; font-size:11px;" onclick="window.canvasEngine.importExistingDocTypeAndConnect('${dt.doctype_name}')">+ Add to Canvas</button>`;
+
+			html += `
+				<tr>
+					<td style="padding: 8px 12px; font-weight: 600;">📄 ${dt.doctype_name} ${childTag}${submitTag}${customTag}</td>
+					<td style="padding: 8px 12px; color: var(--sc-text-muted);">${dt.module || 'Custom'}</td>
+					<td style="padding: 8px 12px;">${dt.is_child_table ? 'Child Table' : 'Standard'}</td>
+					<td style="padding: 8px 12px; text-align: right;">${actionBtn}</td>
+				</tr>
+			`;
+		});
+
+		html += `</tbody></table>`;
+		container.innerHTML = html;
+	}
+
 
 	renderNewDocTypeFields() {
 		const tbody = document.getElementById('sc-doctype-fields-tbody');
@@ -1269,7 +1447,7 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 	showAddFieldModal(doctypeName) {
 		const html = `
 			<div class="sc-modal-backdrop" id="sc-modal-addfield">
-				<div class="sc-modal-window" style="width:460px;">
+				<div class="sc-modal-window" style="width:480px;">
 					<div class="sc-modal-header">
 						<div style="font-size:16px; font-weight:700;">Add Field to ${doctypeName}</div>
 						<button class="sc-btn" onclick="document.getElementById('sc-modal-addfield').remove()">✕</button>
@@ -1281,7 +1459,7 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 						</div>
 						<div class="sc-prop-group">
 							<div class="sc-prop-label">Field Type</div>
-							<select class="sc-input" id="sc-input-ftype">
+							<select class="sc-input" id="sc-input-ftype" onchange="window.canvasEngine.onAddFieldTypeChange()">
 								<option value="Data">Data</option>
 								<option value="Link">Link</option>
 								<option value="Table">Table (Child Table)</option>
@@ -1291,14 +1469,20 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 								<option value="Currency">Currency</option>
 								<option value="Check">Check</option>
 								<option value="Date">Date</option>
+								<option value="Datetime">Datetime</option>
+								<option value="Small Text">Small Text</option>
+								<option value="Text">Text</option>
+								<option value="Attach">Attach</option>
 							</select>
 						</div>
 						<div class="sc-prop-group">
 							<div class="sc-prop-label">Options (Target DocType if Link/Table)</div>
-							<input type="text" class="sc-input" id="sc-input-foptions" placeholder="e.g. Customer Group">
+							<div id="sc-addfield-opts-container">
+								<input type="text" class="sc-input" id="sc-input-foptions" placeholder="e.g. Customer Group">
+							</div>
 						</div>
 						<div class="sc-prop-group">
-							<label><input type="checkbox" id="sc-input-freqd"> Mandatory</label>
+							<label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="sc-input-freqd"> Mandatory</label>
 						</div>
 						<div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
 							<button class="sc-btn" onclick="document.getElementById('sc-modal-addfield').remove()">Cancel</button>
@@ -1310,12 +1494,44 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		`;
 		document.getElementById('sc-modal-container').innerHTML = html;
 	}
+
+	onAddFieldTypeChange() {
+		const ftype = document.getElementById('sc-input-ftype').value;
+		const container = document.getElementById('sc-addfield-opts-container');
+		if (!container) return;
+
+		if (ftype === 'Link' || ftype === 'Table') {
+			const projNames = new Set((this.doctypes || []).map(d => d.doctype_name));
+			const projOpts = (this.doctypes || []).map(d => `<option value="${d.doctype_name}">📄 ${d.doctype_name}</option>`).join('');
+			const sysOpts = (this.systemDocTypes || [])
+				.filter(d => !projNames.has(d.doctype_name))
+				.map(d => `<option value="${d.doctype_name}">🌐 ${d.doctype_name} (${d.module})</option>`)
+				.join('');
+
+			container.innerHTML = `
+				<select class="sc-input" id="sc-input-foptions" style="font-size: 12px; padding: 6px 10px; height: 32px; width: 100%;">
+					<option value="">-- Select Target DocType --</option>
+					${projOpts ? `<optgroup label="Project DocTypes">${projOpts}</optgroup>` : ''}
+					${sysOpts ? `<optgroup label="Existing Frappe System DocTypes">${sysOpts}</optgroup>` : ''}
+				</select>
+			`;
+		} else {
+			container.innerHTML = `
+				<input type="text" class="sc-input" id="sc-input-foptions" placeholder="e.g. Customer Group">
+			`;
+		}
+	}
 	
 	submitAddField(doctypeName) {
-		const fname = document.getElementById('sc-input-fname').value.trim();
-		const ftype = document.getElementById('sc-input-ftype').value;
-		const foptions = document.getElementById('sc-input-foptions').value.trim();
-		const freqd = document.getElementById('sc-input-freqd').checked ? 1 : 0;
+		const fnameInput = document.getElementById('sc-input-fname');
+		const ftypeSelect = document.getElementById('sc-input-ftype');
+		const foptsElem = document.getElementById('sc-input-foptions');
+		const freqdCheck = document.getElementById('sc-input-freqd');
+
+		const fname = fnameInput ? fnameInput.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_') : '';
+		const ftype = ftypeSelect ? ftypeSelect.value : 'Data';
+		const foptions = foptsElem ? foptsElem.value.trim() : '';
+		const freqd = freqdCheck && freqdCheck.checked ? 1 : 0;
 		
 		if (!fname) return frappe.msgprint("Fieldname is required");
 		
@@ -1328,23 +1544,45 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 				reqd: freqd
 			}];
 			
-			frappe.call({
-				method: "system_canvas.api.save_doctype",
-				args: {
-					project_name: this.projectName,
-					doctype_name: doctypeName,
-					module: dt.module,
-					is_child_table: dt.is_child_table,
-					is_submittable: dt.is_submittable,
-					fields: JSON.stringify(updatedFields)
-				},
-				callback: (r) => {
-					if (r.message) {
-						document.getElementById('sc-modal-addfield').remove();
-						this.loadProject(this.projectName);
+			const saveFieldCall = () => {
+				frappe.call({
+					method: "system_canvas.api.save_doctype",
+					args: {
+						project_name: this.projectName,
+						doctype_name: doctypeName,
+						module: dt.module,
+						is_child_table: dt.is_child_table,
+						is_submittable: dt.is_submittable,
+						fields: JSON.stringify(updatedFields)
+					},
+					callback: (r) => {
+						if (r.message) {
+							const modal = document.getElementById('sc-modal-addfield');
+							if (modal) modal.remove();
+							this.loadProject(this.projectName);
+						}
 					}
+				});
+			};
+
+			// If linked target DocType exists in system but not yet added to project canvas, auto-add target DocType to canvas as well
+			const projNames = new Set((this.doctypes || []).map(d => d.doctype_name));
+			if ((ftype === 'Link' || ftype === 'Table') && foptions && !projNames.has(foptions)) {
+				const isSys = (this.systemDocTypes || []).some(s => s.doctype_name === foptions);
+				if (isSys) {
+					frappe.call({
+						method: "system_canvas.api.add_existing_doctype",
+						args: {
+							project_name: this.projectName,
+							doctype_name: foptions
+						},
+						callback: () => saveFieldCall()
+					});
+					return;
 				}
-			});
+			}
+
+			saveFieldCall();
 		}
 	}
 	
@@ -1398,24 +1636,45 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 			};
 			const updatedFields = [...(dt.fields || []), newField];
 
-			frappe.call({
-				method: "system_canvas.api.save_doctype",
-				args: {
-					project_name: this.projectName,
-					doctype_name: sourceDocType,
-					module: dt.module,
-					is_child_table: dt.is_child_table,
-					is_submittable: dt.is_submittable,
-					fields: JSON.stringify(updatedFields)
-				},
-				callback: (r) => {
-					if (r.message) {
-						this.loadProject(this.projectName);
+			const saveRelCall = () => {
+				frappe.call({
+					method: "system_canvas.api.save_doctype",
+					args: {
+						project_name: this.projectName,
+						doctype_name: sourceDocType,
+						module: dt.module,
+						is_child_table: dt.is_child_table,
+						is_submittable: dt.is_submittable,
+						fields: JSON.stringify(updatedFields)
+					},
+					callback: (r) => {
+						if (r.message) {
+							this.loadProject(this.projectName);
+						}
 					}
+				});
+			};
+
+			const projNames = new Set((this.doctypes || []).map(d => d.doctype_name));
+			if (target && !projNames.has(target)) {
+				const isSys = (this.systemDocTypes || []).some(s => s.doctype_name === target);
+				if (isSys) {
+					frappe.call({
+						method: "system_canvas.api.add_existing_doctype",
+						args: {
+							project_name: this.projectName,
+							doctype_name: target
+						},
+						callback: () => saveRelCall()
+					});
+					return;
 				}
-			});
+			}
+
+			saveRelCall();
 		}
 	}
+
 
 	deleteRelation(sourceDocType, fieldname) {
 		frappe.confirm(`Are you sure you want to delete the relation via field "${fieldname}" on ${sourceDocType}?`, () => {
