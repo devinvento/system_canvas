@@ -71,15 +71,18 @@ def get_project_details(project_name):
 	doctype_docs = frappe.get_all(
 		"System Canvas DocType",
 		filters={"project": project_name},
-		fields=["name", "doctype_name", "label", "module", "is_child_table", "is_submittable", "position_x", "position_y", "description"]
+		fields=["name", "doctype_name", "is_child_table", "is_submittable", "position_x", "position_y", "description"]
 	)
 	
 	doctypes_list = []
 	doctype_names_map = {dt.doctype_name: dt for dt in doctype_docs}
 	
+	project_module = project_doc.module or "Custom"
 	for dt in doctype_docs:
 		dt_obj = frappe.get_doc("System Canvas DocType", dt.name)
-		doctypes_list.append(dt_obj.as_dict())
+		dt_dict = dt_obj.as_dict()
+		dt_dict["module"] = project_module
+		doctypes_list.append(dt_dict)
 	
 	# Compute Data Relations (from Link & Table fields)
 	data_relations = []
@@ -95,7 +98,6 @@ def get_project_details(project_name):
 					"source": src_name,
 					"target": target,
 					"fieldname": fname,
-					"label": f.get("label") or fname,
 					"relation_type": ftype,
 					"is_internal": target in doctype_names_map
 				})
@@ -107,7 +109,7 @@ def get_project_details(project_name):
 	}
 
 @frappe.whitelist()
-def save_doctype(project_name, doctype_name, label=None, module="Selling", is_child_table=0, is_submittable=0, description="", fields=None, position_x=100, position_y=100):
+def save_doctype(project_name, doctype_name, module="Selling", is_child_table=0, is_submittable=0, description="", fields=None, position_x=100, position_y=100):
 	"""Create or update a System Canvas DocType and its fields."""
 	if not project_name or not doctype_name:
 		frappe.throw(_("Project Name and DocType Name are required"))
@@ -128,9 +130,6 @@ def save_doctype(project_name, doctype_name, label=None, module="Selling", is_ch
 		doc.doctype_name = doctype_name
 		doc.position_x = float(position_x or 100)
 		doc.position_y = float(position_y or 100)
-		
-	doc.label = label or doctype_name
-	doc.module = module or "Selling"
 	doc.is_child_table = is_child_table
 	doc.is_submittable = is_submittable
 	doc.description = description
@@ -145,7 +144,6 @@ def save_doctype(project_name, doctype_name, label=None, module="Selling", is_ch
 			
 			doc.append("fields", {
 				"fieldname": fname,
-				"label": f.get("label") or fname,
 				"fieldtype": ftype,
 				"options": target,
 				"reqd": int(f.get("reqd") or 0),
@@ -186,32 +184,83 @@ def update_canvas_positions(project_name, positions):
 
 @frappe.whitelist()
 def generate_frappe_doctypes(project_name):
-	"""Generate standard Frappe DocType schemas for the specified project."""
+	"""Generate and save standard/custom Frappe DocType schemas for the specified project."""
 	details = get_project_details(project_name)
 	doctypes = details.get("doctypes", [])
 	
 	generated = []
 	for dt in doctypes:
-		schema = {
-			"name": dt.get("doctype_name"),
-			"label": dt.get("label") or dt.get("doctype_name"),
-			"module": dt.get("module") or "Custom",
-			"istable": dt.get("is_child_table", 0),
-			"is_submittable": dt.get("is_submittable", 0),
-			"fields": []
-		}
+		dt_name = dt.get("doctype_name")
+		is_child_table = int(dt.get("is_child_table", 0))
+		is_submittable = int(dt.get("is_submittable", 0))
+		module = dt.get("module") or "Custom"
+		
+		# Build fields
+		fields_list = []
 		for f in dt.get("fields", []):
-			schema["fields"].append({
+			fields_list.append({
 				"fieldname": f.get("fieldname"),
-				"label": f.get("label"),
+				"label": f.get("fieldname").replace("_", " ").title() if f.get("fieldname") else "",
 				"fieldtype": f.get("fieldtype"),
 				"options": f.get("options"),
-				"reqd": f.get("reqd"),
-				"read_only": f.get("read_only"),
-				"in_list_view": f.get("in_list_view")
+				"reqd": int(f.get("reqd") or 0),
+				"read_only": int(f.get("read_only") or 0),
+				"in_list_view": int(f.get("in_list_view") or 0)
 			})
+		
+		if frappe.db.exists("DocType", dt_name):
+			is_custom = frappe.db.get_value("DocType", dt_name, "custom")
+			if not is_custom:
+				frappe.throw(_("DocType '{0}' is a standard Frappe DocType and cannot be generated or modified.").format(dt_name))
+			
+			# Load and update
+			doc = frappe.get_doc("DocType", dt_name)
+			doc.istable = is_child_table
+			doc.is_submittable = is_submittable
+			doc.module = module
+			doc.custom = 1
+			doc.fields = []
+			for fld in fields_list:
+				doc.append("fields", fld)
+			doc.save(ignore_permissions=True)
+		else:
+			# Create new
+			doc = frappe.get_doc({
+				"doctype": "DocType",
+				"name": dt_name,
+				"module": module,
+				"custom": 1,
+				"autoname": "hash" if is_child_table else "Prompt",
+				"istable": is_child_table,
+				"is_submittable": is_submittable,
+				"fields": fields_list,
+				"permissions": [
+					{
+						"role": "System Manager",
+						"read": 1,
+						"write": 1,
+						"create": 1,
+						"delete": 1,
+						"submit": is_submittable,
+						"cancel": is_submittable,
+						"amend": is_submittable
+					}
+				] if not is_child_table else []
+			})
+			doc.insert(ignore_permissions=True)
+			
+		schema = {
+			"name": dt_name,
+			"label": dt_name,
+			"module": module,
+			"istable": is_child_table,
+			"is_submittable": is_submittable,
+			"fields": fields_list
+		}
 		generated.append(schema)
 		
+	frappe.db.commit()
+	
 	return {
 		"project": project_name,
 		"count": len(generated),

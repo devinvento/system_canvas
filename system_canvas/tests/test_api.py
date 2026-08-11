@@ -8,6 +8,8 @@ from system_canvas import api
 class TestSystemCanvasAPI(unittest.TestCase):
 	def setUp(self):
 		self.project_name = "Test Jewellery ERP"
+		if frappe.db.exists("DocType", "Test Customer"):
+			frappe.delete_doc("DocType", "Test Customer", ignore_permissions=True, force=True)
 		if frappe.db.exists("System Canvas Project", self.project_name):
 			# Cleanup existing test data
 			dts = frappe.get_all("System Canvas DocType", filters={"project": self.project_name}, pluck="name")
@@ -31,9 +33,9 @@ class TestSystemCanvasAPI(unittest.TestCase):
 			doctype_name="Customer",
 			module="Selling",
 			fields=[
-				{"fieldname": "customer_name", "label": "Customer Name", "fieldtype": "Data", "reqd": 1},
-				{"fieldname": "mobile", "label": "Mobile", "fieldtype": "Data"},
-				{"fieldname": "customer_group", "label": "Customer Group", "fieldtype": "Link", "options": "Customer Group"}
+				{"fieldname": "customer_name", "fieldtype": "Data", "reqd": 1},
+				{"fieldname": "mobile", "fieldtype": "Data"},
+				{"fieldname": "customer_group", "fieldtype": "Link", "options": "Customer Group"}
 			]
 		)
 		self.assertEqual(cust_dt["doctype_name"], "Customer")
@@ -45,10 +47,10 @@ class TestSystemCanvasAPI(unittest.TestCase):
 			module="Selling",
 			is_submittable=1,
 			fields=[
-				{"fieldname": "customer", "label": "Customer", "fieldtype": "Link", "options": "Customer", "reqd": 1},
-				{"fieldname": "transaction_date", "label": "Transaction Date", "fieldtype": "Date"},
-				{"fieldname": "items", "label": "Items", "fieldtype": "Table", "options": "Sales Order Item"},
-				{"fieldname": "grand_total", "label": "Grand Total", "fieldtype": "Currency"}
+				{"fieldname": "customer", "fieldtype": "Link", "options": "Customer", "reqd": 1},
+				{"fieldname": "transaction_date", "fieldtype": "Date"},
+				{"fieldname": "items", "fieldtype": "Table", "options": "Sales Order Item"},
+				{"fieldname": "grand_total", "fieldtype": "Currency"}
 			]
 		)
 		self.assertEqual(so_dt["doctype_name"], "Sales Order")
@@ -71,11 +73,11 @@ class TestSystemCanvasAPI(unittest.TestCase):
 		api.create_project(project_name=self.project_name)
 		api.save_doctype(
 			project_name=self.project_name,
-			doctype_name="Customer",
+			doctype_name="Test Customer",
 			fields=[{"fieldname": "customer_name", "fieldtype": "Data"}]
 		)
 
 		# Test Generator
 		generated = api.generate_frappe_doctypes(self.project_name)
 		self.assertEqual(generated["count"], 1)
-		self.assertEqual(generated["doctypes"][0]["name"], "Customer")
+		self.assertEqual(generated["doctypes"][0]["name"], "Test Customer")

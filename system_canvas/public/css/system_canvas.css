@@ -4,8 +4,8 @@
 :root {
 	--sc-bg-main: #0B0F19;
 	--sc-bg-surface: #1E293B;
-	--sc-bg-card: rgba(30, 41, 59, 0.85);
-	--sc-bg-card-hover: rgba(51, 65, 85, 0.9);
+	--sc-bg-card: #1E293B;
+	--sc-bg-card-hover: #334155;
 	--sc-border: rgba(51, 65, 85, 0.6);
 	--sc-border-active: #38BDF8;
 	--sc-text-main: #F8FAFC;
@@ -260,7 +260,7 @@
 	width: 10000px;
 	height: 10000px;
 	pointer-events: none;
-	z-index: 5;
+	z-index: 15;
 }
 
 .sc-edge-path {
@@ -609,3 +609,22 @@
 	font-weight: 600;
 	font-size: 12px;
 }
+
+/* Fullscreen mode helper */
+.sc-app-wrapper:fullscreen {
+	height: 100vh !important;
+	width: 100vw !important;
+	padding: 0;
+	margin: 0;
+}
+
+/* Delete Button hover effect */
+.sc-node-delete-btn {
+	transition: all 0.2s ease;
+}
+.sc-node-delete-btn:hover {
+	background-color: var(--sc-accent-rose) !important;
+	color: #fff !important;
+	transform: scale(1.15);
+}
+

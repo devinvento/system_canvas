@@ -17,6 +17,7 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		this.projectData = null;
 		this.doctypes = [];
 		this.dataRelations = [];
+		this.workflows = [];
 		
 		// Interaction state
 		this.selectedDocType = null;
@@ -45,6 +46,7 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 						<button class="sc-btn sc-btn-primary" id="sc-btn-new-project">+ New Project</button>
 					</div>
 					<div class="sc-header-actions">
+						<button class="sc-btn" id="sc-btn-fullscreen" style="display:none;" onclick="window.canvasEngine.toggleFullScreen()">📺 Full Screen</button>
 						<button class="sc-btn" id="sc-btn-new-doctype" style="display:none;">+ New DocType</button>
 						<button class="sc-btn" id="sc-btn-auto-layout" style="display:none;">📐 Auto Layout</button>
 						<button class="sc-btn" id="sc-btn-full-canvas" style="display:none;">Fit Canvas</button>
@@ -212,6 +214,33 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 	
 	applyTransform() {
 		this.transformLayer.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.zoom})`;
+		this.saveViewportState();
+	}
+
+	saveViewportState() {
+		if (!this.projectName) return;
+		localStorage.setItem(`sc_viewport_panX_${this.projectName}`, this.panX);
+		localStorage.setItem(`sc_viewport_panY_${this.projectName}`, this.panY);
+		localStorage.setItem(`sc_viewport_zoom_${this.projectName}`, this.zoom);
+	}
+
+	restoreViewportState() {
+		if (!this.projectName) return;
+		const panX = localStorage.getItem(`sc_viewport_panX_${this.projectName}`);
+		const panY = localStorage.getItem(`sc_viewport_panY_${this.projectName}`);
+		const zoom = localStorage.getItem(`sc_viewport_zoom_${this.projectName}`);
+		
+		if (panX !== null) this.panX = parseFloat(panX);
+		else this.panX = 0;
+		
+		if (panY !== null) this.panY = parseFloat(panY);
+		else this.panY = 0;
+		
+		if (zoom !== null) this.zoom = parseFloat(zoom);
+		else this.zoom = 1;
+		
+		this.transformLayer.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.zoom})`;
+		document.getElementById('sc-zoom-reset').innerText = `${Math.round(this.zoom * 100)}%`;
 	}
 	
 	loadProjectsList() {
@@ -235,7 +264,7 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		});
 	}
 	
-	loadProject(projectName) {
+	loadProject(projectName, callback) {
 		this.projectName = projectName;
 		frappe.call({
 			method: "system_canvas.api.get_project_details",
@@ -247,6 +276,7 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 					this.dataRelations = r.message.data_relations || [];
 					
 					this.showProjectUI();
+					this.restoreViewportState();
 					this.renderTree();
 					
 					const hasCustomPos = this.doctypes.some(d => d.position_x && d.position_x !== 100);
@@ -256,12 +286,28 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 						this.renderNodes();
 						this.renderEdges();
 					}
+					if (callback) callback(r);
+					this.refreshFullModalIfOpen();
 				}
 			}
 		});
 	}
+
+	refreshFullModalIfOpen() {
+		const modal = document.getElementById('sc-modal-level3');
+		if (modal && this.selectedDocType) {
+			const activeTabEl = modal.querySelector('.sc-modal-tab.active');
+			if (activeTabEl) {
+				const isFields = activeTabEl.innerText.includes('Fields');
+				const tabName = isFields ? 'fields' : 'relations';
+				this.showDocTypeFullModal(this.selectedDocType);
+				this.switchModalTab(tabName);
+			}
+		}
+	}
 	
 	showProjectUI() {
+		document.getElementById('sc-btn-fullscreen').style.display = 'inline-flex';
 		document.getElementById('sc-btn-new-doctype').style.display = 'inline-flex';
 		document.getElementById('sc-btn-auto-layout').style.display = 'inline-flex';
 		document.getElementById('sc-btn-full-canvas').style.display = 'inline-flex';
@@ -285,9 +331,12 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 			const activeClass = this.selectedDocType === dt.doctype_name ? 'active' : '';
 			
 			html += `
-				<div class="sc-tree-item ${activeClass}" onclick="window.canvasEngine.selectDocType('${dt.doctype_name}')">
-					<span>📄 ${dt.doctype_name}</span>
-					<div>${childTag} ${submitTag}</div>
+				<div class="sc-tree-item ${activeClass}" onclick="window.canvasEngine.selectDocType('${dt.doctype_name}')" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+					<div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+						<span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">📄 ${dt.doctype_name}</span>
+						<div style="display: flex; gap: 4px; flex-wrap: wrap;">${childTag} ${submitTag}</div>
+					</div>
+					<button class="sc-node-delete-btn" title="Delete DocType" onclick="event.stopPropagation(); window.canvasEngine.deleteDocType('${dt.doctype_name}')" style="background: none; border: none; color: var(--sc-text-muted); cursor: pointer; font-size: 11px; padding: 4px; display: flex; align-items: center; justify-content: center; border-radius: 4px;">✕</button>
 				</div>
 			`;
 		});
@@ -336,11 +385,12 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 			fieldsHtml += `</div>`;
 			
 			card.innerHTML = `
-				<div class="sc-node-header">
-					<div class="sc-node-title">
+				<div class="sc-node-header" style="display: flex; justify-content: space-between; align-items: center;">
+					<div class="sc-node-title" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">
 						<span>${dt.is_child_table ? '📦' : '📄'}</span>
 						<span>${dt.doctype_name}</span>
 					</div>
+					<button class="sc-node-delete-btn" title="Delete DocType" onclick="event.stopPropagation(); window.canvasEngine.deleteDocType('${dt.doctype_name}')" style="background: none; border: none; color: var(--sc-text-muted); cursor: pointer; font-size: 11px; padding: 4px; display: flex; align-items: center; justify-content: center; border-radius: 4px; z-index: 10;">✕</button>
 				</div>
 				<div class="sc-node-body">
 					${fieldsHtml}
@@ -431,7 +481,7 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 			this.dataRelations.forEach(rel => {
 				const srcCard = document.getElementById(`sc-node-${rel.source}`);
 				const tgtCard = document.getElementById(`sc-node-${rel.target}`);
-				if (srcCard) {
+				if (srcCard && tgtCard) {
 					const isTable = rel.relation_type === 'Table';
 					const markerId = isTable ? 'arrow-table' : 'arrow-data';
 					const edgeClass = isTable ? 'sc-edge-table' : 'sc-edge-data';
@@ -451,17 +501,15 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		
 		let startY = srcRect.y + srcRect.h / 2;
 		const fieldElem = document.getElementById(`sc-field-${rel.source}-${rel.fieldname}`);
-		if (fieldElem && fieldElem.offsetHeight > 0) {
-			const cardBox = srcCard.getBoundingClientRect();
-			const fieldBox = fieldElem.getBoundingClientRect();
-			if (cardBox.height > 0 && fieldBox.height > 0) {
-				const relativeFieldY = (fieldBox.top + fieldBox.height / 2 - cardBox.top) / this.zoom;
-				startY = srcRect.y + relativeFieldY;
+		if (fieldElem) {
+			const offsetTop = fieldElem.offsetTop;
+			const offsetHeight = fieldElem.offsetHeight;
+			if (offsetHeight > 0) {
+				startY = srcRect.y + offsetTop + offsetHeight / 2;
 			}
 		}
 		
-		const startX = srcRect.x + srcRect.w;
-		let endX, endY, controlX1, controlY1, controlX2, controlY2, d;
+		let startX, endX, endY, controlX1, controlY1, controlX2, controlY2, d;
 		
 		if (tgtCard) {
 			const tgtRect = {
@@ -470,17 +518,62 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 				w: tgtCard.offsetWidth || 240,
 				h: tgtCard.offsetHeight || 120
 			};
-			endX = tgtRect.x;
-			endY = tgtRect.y + tgtRect.h / 2;
 			
-			const dx = Math.max(Math.abs(endX - startX) * 0.5, 40);
-			controlX1 = startX + dx;
-			controlY1 = startY;
-			controlX2 = endX - dx;
-			controlY2 = endY;
+			const srcCenter = { x: srcRect.x + srcRect.w / 2, y: srcRect.y + srcRect.h / 2 };
+			const tgtCenter = { x: tgtRect.x + tgtRect.w / 2, y: tgtRect.y + tgtRect.h / 2 };
+			
+			const dx = tgtCenter.x - srcCenter.x;
+			const dy = tgtCenter.y - srcCenter.y;
+			
+			if (Math.abs(dx) > Math.abs(dy)) {
+				// Horizontal dominant connection
+				if (dx > 0) {
+					// Target is to the right: connect Right of Source to Left of Target
+					startX = srcRect.x + srcRect.w;
+					endX = tgtRect.x - 6;
+				} else {
+					// Target is to the left: connect Left of Source to Right of Target
+					startX = srcRect.x;
+					endX = tgtRect.x + tgtRect.w + 6;
+				}
+				endY = tgtRect.y + tgtRect.h / 2;
+				
+				const ctrlX = Math.abs(endX - startX) * 0.5;
+				controlX1 = startX + (endX > startX ? ctrlX : -ctrlX);
+				controlY1 = startY;
+				controlX2 = endX - (endX > startX ? ctrlX : -ctrlX);
+				controlY2 = endY;
+			} else {
+				// Vertical dominant connection
+				startX = srcRect.x + srcRect.w / 2;
+				endX = tgtRect.x + tgtRect.w / 2;
+				
+				if (dy > 0) {
+					// Target is below: connect Bottom of Source to Top of Target
+					startY = srcRect.y + srcRect.h;
+					endY = tgtRect.y - 6;
+					
+					const ctrlY = Math.abs(endY - startY) * 0.5;
+					controlX1 = startX;
+					controlY1 = startY + ctrlY;
+					controlX2 = endX;
+					controlY2 = endY - ctrlY;
+				} else {
+					// Target is above: connect Top of Source to Bottom of Target
+					startY = srcRect.y;
+					endY = tgtRect.y + tgtRect.h + 6;
+					
+					const ctrlY = Math.abs(endY - startY) * 0.5;
+					controlX1 = startX;
+					controlY1 = startY - ctrlY;
+					controlX2 = endX;
+					controlY2 = endY + ctrlY;
+				}
+			}
 			d = `M ${startX} ${startY} C ${controlX1} ${controlY1}, ${controlX2} ${controlY2}, ${endX} ${endY}`;
 		} else {
 			// External Target Relation Stub Edge
+			startX = srcRect.x + srcRect.w;
 			endX = startX + 130;
 			endY = startY;
 			d = `M ${startX} ${startY} L ${endX} ${endY}`;
@@ -499,7 +592,7 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		const midX = (startX + endX) / 2;
 		const midY = (startY + endY) / 2;
 		const labelText = tgtCard 
-			? (rel.label || rel.fieldname) 
+			? rel.fieldname 
 			: `${rel.fieldname} ➔ ${rel.target}`;
 		const textLen = Math.max(labelText.length * 7 + 24, 75);
 		
@@ -575,7 +668,6 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		
 		const fields = dt.fields || [];
 		const rels = this.dataRelations.filter(r => r.source === doctypeName || r.target === doctypeName);
-		const wf = this.workflows.find(w => w.document_type === doctypeName);
 		
 		let fieldsRows = fields.map((f, idx) => `
 			<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--sc-border);">
@@ -623,6 +715,7 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 	}
 	
 	showDocTypeFullModal(doctypeName) {
+		this.selectedDocType = doctypeName;
 		const dt = this.doctypes.find(d => d.doctype_name === doctypeName);
 		if (!dt) return;
 		
@@ -654,13 +747,16 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 	
 	getModalFieldsTabHtml(dt) {
 		const fields = dt.fields || [];
-		let rows = fields.map(f => `
+		let rows = fields.map((f, idx) => `
 			<tr>
 				<td><b>${f.fieldname}</b></td>
-				<td>${f.label || f.fieldname}</td>
+				<td>${f.fieldname.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</td>
 				<td><span class="sc-field-type-pill">${f.fieldtype}</span></td>
 				<td>${f.options || '-'}</td>
 				<td>${f.reqd ? '✅' : '❌'}</td>
+				<td style="text-align: right;">
+					<button class="sc-btn" style="padding: 2px 6px; font-size: 11px;" onclick="window.canvasEngine.removeField('${dt.doctype_name}', ${idx})">✕</button>
+				</td>
 			</tr>
 		`).join('');
 		
@@ -673,43 +769,89 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 						<th>Type</th>
 						<th>Options</th>
 						<th>Mandatory</th>
+						<th style="text-align: right;">Action</th>
 					</tr>
 				</thead>
 				<tbody>
-					${rows || '<tr><td colspan="5">No fields defined</td></tr>'}
+					${rows || '<tr><td colspan="6">No fields defined</td></tr>'}
 				</tbody>
 			</table>
 		`;
 	}
 	
 	switchModalTab(tabName) {
-		document.querySelectorAll('.sc-modal-tab').forEach(t => t.classList.remove('active'));
-		event.target.classList.add('active');
+		document.querySelectorAll('.sc-modal-tab').forEach(t => {
+			const isTarget = tabName === 'fields' ? t.innerText.includes('Fields') : t.innerText.includes('Relations');
+			if (isTarget) {
+				t.classList.add('active');
+			} else {
+				t.classList.remove('active');
+			}
+		});
 		
 		const dt = this.doctypes.find(d => d.doctype_name === this.selectedDocType);
 		const content = document.getElementById('sc-modal-tab-content');
+		if (!dt || !content) return;
 		
 		if (tabName === 'fields') {
 			content.innerHTML = this.getModalFieldsTabHtml(dt);
 		} else if (tabName === 'relations') {
 			const rels = this.dataRelations.filter(r => r.source === dt.doctype_name || r.target === dt.doctype_name);
+			
+			const otherDocTypes = this.doctypes.filter(d => d.doctype_name !== dt.doctype_name);
+			const dtOptionsHtml = otherDocTypes.map(d => `<option value="${d.doctype_name}">${d.doctype_name}</option>`).join('');
+
 			content.innerHTML = `
-				<table class="sc-table">
+				<table class="sc-table" style="margin-bottom: 24px;">
 					<thead>
-						<tr><th>Direction</th><th>Source</th><th>Target</th><th>Field</th><th>Relation Type</th></tr>
+						<tr>
+							<th>Direction</th>
+							<th>Source</th>
+							<th>Target</th>
+							<th>Field</th>
+							<th>Relation Type</th>
+							<th style="text-align: right;">Action</th>
+						</tr>
 					</thead>
 					<tbody>
-						${rels.map(r => `
+						${rels.length === 0 ? '<tr><td colspan="6" style="text-align: center; color: var(--sc-text-muted); padding: 16px;">No relationships found</td></tr>' : rels.map(r => `
 							<tr>
 								<td>${r.source === dt.doctype_name ? 'Outgoing ➔' : '➔ Incoming'}</td>
 								<td>${r.source}</td>
 								<td>${r.target}</td>
-								<td>${r.fieldname}</td>
-								<td><span class="sc-field-type-pill">${r.relation_type}</span></td>
+								<td><b>${r.fieldname}</b></td>
+								<td><span class="sc-field-type-pill ${r.relation_type === 'Link' ? 'sc-field-type-link' : 'sc-field-type-table'}">${r.relation_type}</span></td>
+								<td style="text-align: right;">
+									<button class="sc-btn" style="padding: 2px 6px; font-size: 11px;" onclick="window.canvasEngine.deleteRelation('${r.source}', '${r.fieldname}')">✕</button>
+								</td>
 							</tr>
 						`).join('')}
 					</tbody>
 				</table>
+
+				<div style="padding: 16px; border: 1px solid var(--sc-border); border-radius: 8px; background: rgba(30, 41, 59, 0.3);">
+					<div style="font-weight: 600; font-size: 13px; color: var(--sc-accent-blue); margin-bottom: 12px;">+ Add New Relation (Outgoing)</div>
+					<div style="display: flex; gap: 12px; align-items: flex-end;">
+						<div style="flex: 1.5; display: flex; flex-direction: column; gap: 4px;">
+							<div style="font-size: 11px; color: var(--sc-text-muted);">Target DocType</div>
+							<select class="sc-input" id="sc-rel-target-dt" style="height: 32px; font-size: 12px; padding: 0 10px;">
+								${dtOptionsHtml || '<option value="" disabled>No other DocTypes</option>'}
+							</select>
+						</div>
+						<div style="flex: 1.5; display: flex; flex-direction: column; gap: 4px;">
+							<div style="font-size: 11px; color: var(--sc-text-muted);">Fieldname</div>
+							<input type="text" class="sc-input" id="sc-rel-fieldname" placeholder="e.g. customer_link" style="height: 32px; font-size: 12px; padding: 6px 10px;">
+						</div>
+						<div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+							<div style="font-size: 11px; color: var(--sc-text-muted);">Relation Type</div>
+							<select class="sc-input" id="sc-rel-type" style="height: 32px; font-size: 12px; padding: 0 10px;">
+								<option value="Link">Link</option>
+								<option value="Table">Table (Child Table)</option>
+							</select>
+						</div>
+						<button class="sc-btn sc-btn-primary" onclick="window.canvasEngine.saveNewRelation('${dt.doctype_name}')" style="height: 32px; padding: 0 16px; font-size: 12px; display: inline-flex; align-items: center; justify-content: center;">Save Relation</button>
+					</div>
+				</div>
 			`;
 		}
 	}
@@ -759,37 +901,298 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 			}
 		});
 	}
+
+	onDocTypeFieldTypeChange() {
+		const ftype = document.getElementById('sc-input-fld-type').value;
+		this.updateDocTypeFieldOptionsInput(ftype);
+	}
+
+	updateDocTypeFieldOptionsInput(fieldType, defaultValue = '') {
+		const container = document.getElementById('sc-fld-opts-container');
+		if (!container) return;
+
+		if (fieldType === 'Link' || fieldType === 'Table') {
+			const dtOptionsHtml = this.doctypes.map(d => `<option value="${d.doctype_name}">${d.doctype_name}</option>`).join('');
+			container.innerHTML = `
+				<select class="sc-input" id="sc-input-fld-opts" style="font-size: 12px; padding: 6px 10px; height: 32px; width: 100%;">
+					${dtOptionsHtml || '<option value="" disabled>No other DocTypes</option>'}
+				</select>
+			`;
+		} else {
+			container.innerHTML = `
+				<input type="text" class="sc-input" id="sc-input-fld-opts" placeholder="Options (Target DocType / Select Options)" style="font-size: 12px; padding: 6px 10px; width: 100%;" value="${defaultValue}">
+			`;
+		}
+
+		if (defaultValue) {
+			const input = document.getElementById('sc-input-fld-opts');
+			if (input) input.value = defaultValue;
+		}
+	}
 	
 	showNewDocTypeModal() {
+		this.newDocTypeFields = [];
+		this.editingFieldIdx = null;
 		const html = `
 			<div class="sc-modal-backdrop" id="sc-modal-doctype">
-				<div class="sc-modal-window" style="width:500px;">
+				<div class="sc-modal-window" style="width: 800px; max-width: 95vw;">
 					<div class="sc-modal-header">
 						<div style="font-size:16px; font-weight:700;">+ Create New DocType</div>
 						<button class="sc-btn" onclick="document.getElementById('sc-modal-doctype').remove()">✕</button>
 					</div>
-					<div class="sc-modal-body">
-						<div class="sc-prop-group">
-							<div class="sc-prop-label">DocType Name</div>
-							<input type="text" class="sc-input" id="sc-input-dt-name" placeholder="e.g. Customer">
+					<div class="sc-modal-body" style="display: flex; gap: 24px; padding: 20px; overflow: hidden; height: 450px;">
+						<!-- Left Column: DocType Config -->
+						<div style="flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 250px; border-right: 1px solid var(--sc-border); padding-right: 24px; height: 100%; overflow-y: auto;">
+							<div style="font-weight: 600; font-size: 13px; color: var(--sc-accent-blue); text-transform: uppercase; tracking: 0.05em; margin-bottom: 4px;">DocType Configuration</div>
+							<div class="sc-prop-group">
+								<div class="sc-prop-label">DocType Name</div>
+								<input type="text" class="sc-input" id="sc-input-dt-name" placeholder="e.g. Customer">
+							</div>
+							<div class="sc-prop-group">
+								<div class="sc-prop-label">Module</div>
+								<input type="text" class="sc-input" id="sc-input-dt-module" value="Selling">
+							</div>
+							<div class="sc-prop-group" style="display:flex; flex-direction:column; gap:8px; margin-top: 8px;">
+								<label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
+									<input type="checkbox" id="sc-input-dt-child">
+									<span>Is Child Table</span>
+								</label>
+								<label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
+									<input type="checkbox" id="sc-input-dt-submittable">
+									<span>Is Submittable</span>
+								</label>
+							</div>
 						</div>
-						<div class="sc-prop-group">
-							<div class="sc-prop-label">Module</div>
-							<input type="text" class="sc-input" id="sc-input-dt-module" value="Selling">
+
+						<!-- Right Column: Fields Builder -->
+						<div style="flex: 1.5; display: flex; flex-direction: column; gap: 12px; min-width: 380px; height: 100%; overflow: hidden;">
+							<div style="font-weight: 600; font-size: 13px; color: var(--sc-accent-blue); text-transform: uppercase; tracking: 0.05em;">DocType Fields</div>
+							
+							<!-- Add Field Row -->
+							<div style="background: rgba(30, 41, 59, 0.3); border: 1px solid var(--sc-border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+								<div style="display: flex; gap: 8px;">
+									<div style="flex: 1;">
+										<input type="text" class="sc-input" id="sc-input-fld-name" placeholder="Fieldname (e.g. customer_name)" style="font-size: 12px; padding: 6px 10px;">
+									</div>
+									<div style="flex: 1;">
+										<select class="sc-input" id="sc-input-fld-type" onchange="window.canvasEngine.onDocTypeFieldTypeChange()" style="font-size: 12px; padding: 6px 10px; height: 32px;">
+											<option value="Data">Data</option>
+											<option value="Link">Link</option>
+											<option value="Table">Table (Child Table)</option>
+											<option value="Select">Select</option>
+											<option value="Int">Int</option>
+											<option value="Float">Float</option>
+											<option value="Currency">Currency</option>
+											<option value="Check">Check</option>
+											<option value="Date">Date</option>
+										</select>
+									</div>
+								</div>
+								<div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+									<div style="flex: 1.5; width: 100%;" id="sc-fld-opts-container">
+										<input type="text" class="sc-input" id="sc-input-fld-opts" placeholder="Options (Target DocType / Select Options)" style="font-size: 12px; padding: 6px 10px; width: 100%;">
+									</div>
+								</div>
+								<label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; flex: 1; user-select: none;">
+									<input type="checkbox" id="sc-input-fld-reqd">
+									<span>Mandatory</span>
+								</label>
+								<span id="sc-btn-fld-actions-container" style="display: flex; gap: 6px;">
+									<button class="sc-btn sc-btn-primary" id="sc-btn-add-fld" onclick="window.canvasEngine.addNewDocTypeField()" style="padding: 6px 12px; font-size: 12px;">+ Add Field</button>
+								</span>
+							</div>
+
+							<!-- Added Fields List -->
+							<div style="flex: 1; overflow-y: auto; border: 1px solid var(--sc-border); border-radius: 8px; background: rgba(15, 23, 42, 0.5);">
+								<table class="sc-table" style="font-size: 12px; width: 100%;">
+									<thead>
+										<tr style="background: rgba(30, 41, 59, 0.4); position: sticky; top: 0; z-index: 10;">
+											<th style="padding: 8px 10px;">Fieldname</th>
+											<th style="padding: 8px 10px;">Type</th>
+											<th style="padding: 8px 10px;">Options</th>
+											<th style="padding: 8px 10px;">Mandatory</th>
+											<th style="text-align: right; padding: 8px 10px;">Action</th>
+										</tr>
+									</thead>
+									<tbody id="sc-doctype-fields-tbody">
+										<!-- Dynamically populated rows -->
+									</tbody>
+								</table>
+							</div>
 						</div>
-						<div class="sc-prop-group" style="display:flex; gap:20px;">
-							<label><input type="checkbox" id="sc-input-dt-child"> Is Child Table</label>
-							<label><input type="checkbox" id="sc-input-dt-submittable"> Is Submittable</label>
-						</div>
-						<div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
-							<button class="sc-btn" onclick="document.getElementById('sc-modal-doctype').remove()">Cancel</button>
-							<button class="sc-btn sc-btn-primary" onclick="window.canvasEngine.submitNewDocType()">Create DocType</button>
-						</div>
+					</div>
+					<div class="sc-modal-footer" style="padding: 12px 20px; border-top: 1px solid var(--sc-border); display: flex; justify-content: flex-end; gap: 10px; background: rgba(30, 41, 59, 0.2);">
+						<button class="sc-btn" onclick="document.getElementById('sc-modal-doctype').remove()">Cancel</button>
+						<button class="sc-btn sc-btn-primary" onclick="window.canvasEngine.submitNewDocType()">Create DocType</button>
 					</div>
 				</div>
 			</div>
 		`;
 		document.getElementById('sc-modal-container').innerHTML = html;
+
+		// Input listener on DocType name to auto-suggest naming field and module
+		const dtNameInput = document.getElementById('sc-input-dt-name');
+		dtNameInput.addEventListener('input', (e) => {
+			const val = e.target.value.trim();
+			if (val && this.newDocTypeFields.length === 0) {
+				const fname = val.toLowerCase().replace(/[^a-z0-9_]/g, '_') + '_name';
+				document.getElementById('sc-input-fld-name').placeholder = `e.g. ${fname}`;
+			}
+		});
+
+		this.renderNewDocTypeFields();
+	}
+
+	renderNewDocTypeFields() {
+		const tbody = document.getElementById('sc-doctype-fields-tbody');
+		if (!tbody) return;
+
+		if (this.newDocTypeFields.length === 0) {
+			tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--sc-text-muted); padding: 16px;">No fields added yet.</td></tr>`;
+			return;
+		}
+
+		tbody.innerHTML = this.newDocTypeFields.map((f, idx) => {
+			let pillClass = 'sc-field-type-pill';
+			if (f.fieldtype === 'Link') pillClass += ' sc-field-type-link';
+			if (f.fieldtype === 'Table') pillClass += ' sc-field-type-table';
+
+			const isEditing = this.editingFieldIdx === idx;
+			const rowStyle = isEditing ? 'style="background: rgba(56, 189, 248, 0.15);"' : '';
+			const editIndicator = isEditing ? ' <span style="font-size: 9px; color: var(--sc-accent-blue);">(editing)</span>' : '';
+
+			return `
+				<tr ${rowStyle}>
+					<td style="padding: 6px 10px; font-weight: 600;">${f.fieldname}${editIndicator}</td>
+					<td style="padding: 6px 10px;"><span class="${pillClass}">${f.fieldtype}</span></td>
+					<td style="padding: 6px 10px; color: var(--sc-text-muted);">${f.options || '-'}</td>
+					<td style="padding: 6px 10px; text-align: center;">${f.reqd ? '✅' : '❌'}</td>
+					<td style="padding: 6px 10px; text-align: right; white-space: nowrap;">
+						<button class="sc-btn" style="padding: 2px 6px; font-size: 11px; margin-right: 4px;" onclick="window.canvasEngine.editNewDocTypeField(${idx})">✏️</button>
+						<button class="sc-btn" style="padding: 2px 6px; font-size: 11px;" onclick="window.canvasEngine.removeNewDocTypeField(${idx})">✕</button>
+					</td>
+				</tr>
+			`;
+		}).join('');
+	}
+
+	addNewDocTypeField() {
+		const fnameInput = document.getElementById('sc-input-fld-name');
+		const ftypeSelect = document.getElementById('sc-input-fld-type');
+		const foptsInput = document.getElementById('sc-input-fld-opts');
+		const freqdCheck = document.getElementById('sc-input-fld-reqd');
+
+		let fname = fnameInput.value.trim().toLowerCase();
+		// Convert spaces, hyphens, etc to underscores
+		fname = fname.replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_');
+		const ftype = ftypeSelect.value;
+		const foptions = foptsInput.value.trim();
+		const freqd = freqdCheck.checked ? 1 : 0;
+
+		if (!fname) {
+			return frappe.msgprint("Fieldname is required");
+		}
+
+		if (this.editingFieldIdx !== null) {
+			// Check duplicate (ignoring itself)
+			if (this.newDocTypeFields.some((f, idx) => idx !== this.editingFieldIdx && f.fieldname === fname)) {
+				return frappe.msgprint(`Fieldname "${fname}" already exists`);
+			}
+
+			this.newDocTypeFields[this.editingFieldIdx] = {
+				fieldname: fname,
+				fieldtype: ftype,
+				options: foptions,
+				reqd: freqd
+			};
+
+			this.editingFieldIdx = null;
+
+			// Restore button
+			const container = document.getElementById('sc-btn-fld-actions-container');
+			if (container) {
+				container.innerHTML = `
+					<button class="sc-btn sc-btn-primary" id="sc-btn-add-fld" onclick="window.canvasEngine.addNewDocTypeField()" style="padding: 6px 12px; font-size: 12px;">+ Add Field</button>
+				`;
+			}
+		} else {
+			// Check duplicate
+			if (this.newDocTypeFields.some(f => f.fieldname === fname)) {
+				return frappe.msgprint(`Fieldname "${fname}" already exists`);
+			}
+
+			this.newDocTypeFields.push({
+				fieldname: fname,
+				fieldtype: ftype,
+				options: foptions,
+				reqd: freqd
+			});
+		}
+
+		// Clear field inputs
+		fnameInput.value = '';
+		this.updateDocTypeFieldOptionsInput('Data');
+		freqdCheck.checked = false;
+
+		// Re-focus fname input
+		fnameInput.focus();
+
+		this.renderNewDocTypeFields();
+	}
+
+	removeNewDocTypeField(idx) {
+		// If we're removing the field that is currently being edited, cancel the edit first
+		if (this.editingFieldIdx === idx) {
+			this.cancelEditField();
+		} else if (this.editingFieldIdx > idx) {
+			// Adjust editing index if we deleted a field before it
+			this.editingFieldIdx--;
+		}
+		this.newDocTypeFields.splice(idx, 1);
+		this.renderNewDocTypeFields();
+	}
+
+	editNewDocTypeField(idx) {
+		const f = this.newDocTypeFields[idx];
+		if (!f) return;
+
+		this.editingFieldIdx = idx;
+
+		// Populate inputs
+		document.getElementById('sc-input-fld-name').value = f.fieldname;
+		document.getElementById('sc-input-fld-type').value = f.fieldtype;
+		this.updateDocTypeFieldOptionsInput(f.fieldtype, f.options || '');
+		document.getElementById('sc-input-fld-reqd').checked = !!f.reqd;
+
+		// Update button label and add Cancel button
+		const container = document.getElementById('sc-btn-fld-actions-container');
+		if (container) {
+			container.innerHTML = `
+				<button class="sc-btn sc-btn-success" id="sc-btn-add-fld" onclick="window.canvasEngine.addNewDocTypeField()" style="padding: 6px 12px; font-size: 12px;">Update Field</button>
+				<button class="sc-btn" onclick="window.canvasEngine.cancelEditField()" style="padding: 6px 12px; font-size: 12px;">Cancel</button>
+			`;
+		}
+
+		this.renderNewDocTypeFields();
+	}
+
+	cancelEditField() {
+		this.editingFieldIdx = null;
+
+		// Clear field inputs
+		document.getElementById('sc-input-fld-name').value = '';
+		this.updateDocTypeFieldOptionsInput('Data');
+		document.getElementById('sc-input-fld-reqd').checked = false;
+
+		// Restore button
+		const container = document.getElementById('sc-btn-fld-actions-container');
+		if (container) {
+			container.innerHTML = `
+				<button class="sc-btn sc-btn-primary" id="sc-btn-add-fld" onclick="window.canvasEngine.addNewDocTypeField()" style="padding: 6px 12px; font-size: 12px;">+ Add Field</button>
+			`;
+		}
+
+		this.renderNewDocTypeFields();
 	}
 	
 	submitNewDocType() {
@@ -800,6 +1203,50 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		
 		if (!dtName) return frappe.msgprint("DocType name is required");
 		
+		// If there is any unsaved field value in the input boxes, automatically add/update it
+		const fnameInput = document.getElementById('sc-input-fld-name');
+		if (fnameInput) {
+			let fname = fnameInput.value.trim().toLowerCase();
+			if (fname) {
+				fname = fname.replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_');
+				const ftypeSelect = document.getElementById('sc-input-fld-type');
+				const foptsInput = document.getElementById('sc-input-fld-opts');
+				const freqdCheck = document.getElementById('sc-input-fld-reqd');
+
+				const ftype = ftypeSelect.value;
+				const foptions = foptsInput.value.trim();
+				const freqd = freqdCheck.checked ? 1 : 0;
+
+				if (this.editingFieldIdx !== null) {
+					this.newDocTypeFields[this.editingFieldIdx] = {
+						fieldname: fname,
+						fieldtype: ftype,
+						options: foptions,
+						reqd: freqd
+					};
+				} else {
+					if (!this.newDocTypeFields.some(f => f.fieldname === fname)) {
+						this.newDocTypeFields.push({
+							fieldname: fname,
+							fieldtype: ftype,
+							options: foptions,
+							reqd: freqd
+						});
+					}
+				}
+			}
+		}
+
+		let fields = [...this.newDocTypeFields];
+		if (fields.length === 0) {
+			const defaultFname = dtName.toLowerCase().replace(/[^a-z0-9_]/g, '_') + '_name';
+			fields.push({
+				fieldname: defaultFname,
+				fieldtype: "Data",
+				reqd: 1
+			});
+		}
+		
 		frappe.call({
 			method: "system_canvas.api.save_doctype",
 			args: {
@@ -808,9 +1255,7 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 				module: module,
 				is_child_table: isChild,
 				is_submittable: isSubmittable,
-				fields: JSON.stringify([
-					{ fieldname: dtName.toLowerCase() + "_name", label: dtName + " Name", fieldtype: "Data", reqd: 1 }
-				])
+				fields: JSON.stringify(fields)
 			},
 			callback: (r) => {
 				if (r.message) {
@@ -878,7 +1323,6 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 		if (dt) {
 			const updatedFields = [...(dt.fields || []), {
 				fieldname: fname,
-				label: fname.replace(/_/g, ' ').toUpperCase(),
 				fieldtype: ftype,
 				options: foptions,
 				reqd: freqd
@@ -907,20 +1351,95 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 	removeField(doctypeName, fieldIdx) {
 		const dt = this.doctypes.find(d => d.doctype_name === doctypeName);
 		if (dt && dt.fields) {
-			dt.fields.splice(fieldIdx, 1);
+			const field = dt.fields[fieldIdx];
+			if (!field) return;
+			frappe.confirm(`Are you sure you want to delete field "${field.fieldname}" from ${doctypeName}?`, () => {
+				dt.fields.splice(fieldIdx, 1);
+				frappe.call({
+					method: "system_canvas.api.save_doctype",
+					args: {
+						project_name: this.projectName,
+						doctype_name: doctypeName,
+						module: dt.module,
+						is_child_table: dt.is_child_table,
+						is_submittable: dt.is_submittable,
+						fields: JSON.stringify(dt.fields)
+					},
+					callback: () => this.loadProject(this.projectName)
+				});
+			});
+		}
+	}
+
+	saveNewRelation(sourceDocType) {
+		const target = document.getElementById('sc-rel-target-dt').value;
+		let fname = document.getElementById('sc-rel-fieldname').value.trim().toLowerCase();
+		fname = fname.replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_');
+		const ftype = document.getElementById('sc-rel-type').value;
+
+		if (!target) {
+			return frappe.msgprint("Target DocType is required");
+		}
+		if (!fname) {
+			return frappe.msgprint("Fieldname is required");
+		}
+
+		const dt = this.doctypes.find(d => d.doctype_name === sourceDocType);
+		if (dt) {
+			if (dt.fields && dt.fields.some(f => f.fieldname === fname)) {
+				return frappe.msgprint(`Fieldname "${fname}" already exists on ${sourceDocType}`);
+			}
+
+			const newField = {
+				fieldname: fname,
+				fieldtype: ftype,
+				options: target,
+				reqd: 0
+			};
+			const updatedFields = [...(dt.fields || []), newField];
+
 			frappe.call({
 				method: "system_canvas.api.save_doctype",
 				args: {
 					project_name: this.projectName,
-					doctype_name: doctypeName,
+					doctype_name: sourceDocType,
 					module: dt.module,
 					is_child_table: dt.is_child_table,
 					is_submittable: dt.is_submittable,
-					fields: JSON.stringify(dt.fields)
+					fields: JSON.stringify(updatedFields)
 				},
-				callback: () => this.loadProject(this.projectName)
+				callback: (r) => {
+					if (r.message) {
+						this.loadProject(this.projectName);
+					}
+				}
 			});
 		}
+	}
+
+	deleteRelation(sourceDocType, fieldname) {
+		frappe.confirm(`Are you sure you want to delete the relation via field "${fieldname}" on ${sourceDocType}?`, () => {
+			const dt = this.doctypes.find(d => d.doctype_name === sourceDocType);
+			if (dt && dt.fields) {
+				const updatedFields = dt.fields.filter(f => f.fieldname !== fieldname);
+				frappe.call({
+					method: "system_canvas.api.save_doctype",
+					args: {
+						project_name: this.projectName,
+						doctype_name: sourceDocType,
+						module: dt.module,
+						is_child_table: dt.is_child_table,
+						is_submittable: dt.is_submittable,
+						fields: JSON.stringify(updatedFields)
+					},
+					callback: (r) => {
+						if (r.message) {
+							this.loadProject(this.projectName);
+						}
+					}
+				});
+			}
+		});
 	}
 	
 
@@ -938,6 +1457,43 @@ window.SystemCanvasEngine = class SystemCanvasEngine {
 					});
 				}
 			}
+		});
+	}
+
+	toggleFullScreen() {
+		const elem = document.querySelector('.sc-app-wrapper');
+		if (!elem) return;
+		if (!document.fullscreenElement) {
+			elem.requestFullscreen().catch(err => {
+				console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+			});
+		} else {
+			document.exitFullscreen();
+		}
+	}
+
+	deleteDocType(doctypeName) {
+		frappe.confirm(`Are you sure you want to permanently delete DocType "${doctypeName}"? This will also remove any field schema and relationship definitions.`, () => {
+			frappe.call({
+				method: "system_canvas.api.delete_doctype",
+				args: {
+					project_name: this.projectName,
+					doctype_name: doctypeName
+				},
+				callback: (r) => {
+					if (r.message && r.message.status === 'success') {
+						if (this.selectedDocType === doctypeName) {
+							this.selectedDocType = null;
+							this.inspectorContent.innerHTML = `<div style="color:var(--sc-text-muted); text-align:center; padding-top:40px;">Select an item to view properties</div>`;
+						}
+						const modal = document.getElementById('sc-modal-level3');
+						if (modal) {
+							modal.remove();
+						}
+						this.loadProject(this.projectName);
+					}
+				}
+			});
 		});
 	}
 	
